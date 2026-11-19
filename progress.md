@@ -33,7 +33,7 @@
     - `clip-02.mp4`: 30.0s, 720×1280, 2.4 MB, square pixels (1:1), burned-in ASS captions.
     - `clip-03.mp4`: 29.93s, 720×1280, 3.0 MB, square pixels (1:1), H.264/AAC.
   - Observed performance: Total end-to-end processing time was ~25 seconds on pure CPU for the 178-second recording (~7× faster than real-time).
-- Git repository status: Pushed to private GitHub repository `cmidul/Clipper0` on branch `main` (https://github.com/cmidul/Clipper0). Baseline commit `f922159` and progress update `20802f8`. All recordings, caches, model weights, and virtual environments verified excluded.
+- Git repository status: Pushed to GitHub repository `cmidul/Clipper0` on branch `main` (https://github.com/cmidul/Clipper0). Visibility changed to public per user request. Baseline commit `f922159` and progress updates. All recordings, caches, model weights, and virtual environments verified excluded.
 
 ### Agent handover verification and test suite health check — 2026-11-19
 
