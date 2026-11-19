@@ -1,0 +1,15 @@
+{
+  "weights": {
+    "audio_peak": 0.45,
+    "audio_onset": 0.20,
+    "speech_activity": 0.10,
+    "transcript_cues": 0.25
+  },
+  "min_score": 0.25,
+  "min_gap_seconds": 2.0,
+  "max_iou": 0.2,
+  "cues": {
+    "en": ["unbelievable", "no way", "let's go", "amazing", "help me"],
+    "bn": ["অবিশ্বাস্য", "দারুণ", "বাঁচাও", "ওরে বাবা"]
+  }
+}

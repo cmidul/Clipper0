@@ -1,0 +1,47 @@
+[
+  {
+    "name": "three separated audio events",
+    "duration": 120,
+    "background": 0.001,
+    "peaks": {"0": 1.0, "60": 0.9, "119": 0.8},
+    "segments": [],
+    "language": null,
+    "expected_events": [0, 60, 119]
+  },
+  {
+    "name": "quiet Bengali reaction with steady audio",
+    "duration": 90,
+    "background": 0.02,
+    "peaks": {},
+    "segments": [{"start": 42, "end": 46, "text": "ওরে বাবা দারুণ"}],
+    "language": "bn",
+    "expected_events": [44]
+  },
+  {
+    "name": "ordinary speech and steady music",
+    "duration": 90,
+    "background": 0.2,
+    "peaks": {},
+    "segments": [{"start": 10, "end": 70, "text": "I am explaining the game settings."}],
+    "language": "en",
+    "expected_events": []
+  },
+  {
+    "name": "adjacent reactions deduplicated",
+    "duration": 90,
+    "background": 0.001,
+    "peaks": {"41": 1.0, "42": 0.9, "43": 0.95},
+    "segments": [{"start": 41, "end": 44, "text": "No way! Amazing!"}],
+    "language": "en",
+    "expected_events": [42]
+  },
+  {
+    "name": "silence has no highlights",
+    "duration": 90,
+    "background": 0.0,
+    "peaks": {},
+    "segments": [],
+    "language": null,
+    "expected_events": []
+  }
+]

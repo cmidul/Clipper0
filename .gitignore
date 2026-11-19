@@ -1,0 +1,62 @@
+# Local environments and dependencies
+.venv/
+venv/
+node_modules/
+.next/
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+coverage/
+
+# Local config and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Recordings, generated content and model caches
+local-data/
+data/
+recordings/
+imports/
+audio-cache/
+transcripts/
+clips/
+temporary/
+temp/
+models/
+model-cache/
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.db-wal
+*.db-shm
+*.db
+*.mp4
+*.mkv
+*.mov
+*.avi
+*.wav
+*.mp3
+*.flac
+*.srt
+*.ass
+*.onnx
+*.bin
+*.safetensors
+*.pt
+*.pth
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*.log
+
+# Logs
+*.log
