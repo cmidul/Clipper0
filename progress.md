@@ -20,6 +20,21 @@
 
 ## Current handoff
 
+### Real sample pipeline acceptance run — 2026-11-20
+
+- Completed. Ran the full offline highlight clipping, speech transcription, candidate ranking, and vertical rendering pipeline on `local-data/imports/fa9ad4ebb4cd415d95068a84b1122226.mkv` (178.1s / ~3 min, AV1/1080p).
+- Pipeline execution:
+  - CLI: `autoclip clip local-data/imports/fa9ad4ebb4cd415d95068a84b1122226.mkv --count 3 --length 30 --aspect-ratio 9:16 --resolution 720 --compression balanced --captions`
+  - Audio feature extraction & candidate ranking: Identified 3 candidates (114.5–144.5s [score 0.503], 77.5–107.5s [score 0.415], 148.1–178.1s [score 0.288]).
+  - Speech transcription: Ran Faster-Whisper base INT8 locally on CPU from pre-warmed offline model cache. Detected speech activity in candidate 2 (0.555 coverage) and generated aligned ASS and SRT subtitles; candidates 1 & 3 had 0.0 speech activity and produced clean videos without subtitle clutter.
+  - Rendering: Rendered all 3 vertical (9:16) H.264/AAC MP4s at 720×1280, 30 FPS, Balanced CRF 23.
+  - Verification: Inspected all 3 output files with `autoclip inspect`:
+    - `clip-01.mp4`: 30.0s, 720×1280, 3.7 MB, square pixels (1:1), H.264/AAC.
+    - `clip-02.mp4`: 30.0s, 720×1280, 2.4 MB, square pixels (1:1), burned-in ASS captions.
+    - `clip-03.mp4`: 29.93s, 720×1280, 3.0 MB, square pixels (1:1), H.264/AAC.
+  - Observed performance: Total end-to-end processing time was ~25 seconds on pure CPU for the 178-second recording (~7× faster than real-time).
+- Git repository status: Baseline commit `f922159` established on branch `master`.
+
 ### Agent handover verification and test suite health check — 2026-11-19
 
 - Completed. The user authorized continuing development under the Smart Autonomy Policy.
