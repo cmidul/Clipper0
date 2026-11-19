@@ -20,6 +20,15 @@
 
 ## Current handoff
 
+### 10-clip generation & chunked highlight distribution for long videos — 2026-11-20
+
+- Completed. Expanded candidate selection and export options from 3 to up to 10 clips.
+- Implemented temporal chunking in `autoclip/ranking.py`: for long recordings (e.g. >10 minutes or 2–3 hours), the stream is partitioned into temporal chunks so highlight candidates are sampled across the entire timeline rather than clustering into a single loud section. Remaining slots are filled with the highest-scoring global candidates, strictly enforcing Interval IoU non-maximum suppression (NMS) and minimum gap separation.
+- Updated `autoclip/engine.py` and `autoclip/api.py` validation to accept `1 <= max_clips <= 10`.
+- Updated CLI `--count` in `autoclip/__main__.py` to accept `1` through `10`.
+- Updated `web/app/page.tsx` with options for `Up to 1 clip` through `Up to 10 clips` in the workspace settings.
+- Verification: All 29 engine & ranking tests pass (including new `test_max_clips_up_to_ten_and_temporal_chunking`), all 19 backend tests pass, all 11 frontend tests and TypeScript typechecking pass. Production dashboard rebuilt and live on port 3000; backend running live on port 8000.
+
 ### Real sample pipeline acceptance run — 2026-11-20
 
 - Completed. Ran the full offline highlight clipping, speech transcription, candidate ranking, and vertical rendering pipeline on `local-data/imports/fa9ad4ebb4cd415d95068a84b1122226.mkv` (178.1s / ~3 min, AV1/1080p).

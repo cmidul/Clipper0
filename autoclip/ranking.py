@@ -101,8 +101,8 @@ def rank_candidates(activity: list[float], duration: float, clip_length: float =
     config.validate()
     if not math.isfinite(duration) or duration <= 0:
         raise ClipError("Media duration must be finite and positive.")
-    if not math.isfinite(clip_length) or not 15 <= clip_length <= 60 or not 1 <= count <= 3:
-        raise ClipError("Choose 1–3 clips and a clip length between 15 and 60 seconds.")
+    if not math.isfinite(clip_length) or not 15 <= clip_length <= 60 or not 1 <= count <= 10:
+        raise ClipError("Choose 1–10 clips and a clip length between 15 and 60 seconds.")
     if any(not math.isfinite(level) or level < 0 for level in activity):
         raise ClipError("Audio activity must contain finite, nonnegative values.")
     if duration < 15:
@@ -164,15 +164,51 @@ def rank_candidates(activity: list[float], duration: float, clip_length: float =
             "score_kind": "heuristic",
         }
         ranked.append(Candidate(start, end, round(score, 6), evidence))
-    selected = []
-    for candidate in sorted(ranked, key=lambda item: (-item.score, item.start, item.evidence["event_time"])):
-        duplicate = any(
-            interval_iou(candidate, other) > config.max_iou
-            or max(0.0, candidate.start - other.end, other.start - candidate.end) < config.min_gap_seconds
-            for other in selected
-        )
-        if not duplicate:
-            selected.append(candidate)
-        if len(selected) == count:
-            break
+    # For long recordings (e.g. 10m+ or 2-3 hours) with multiple requested clips,
+    # distribute candidates across temporal chunks so highlights span the full recording.
+    chunk_count = min(count, int(duration // max(clip_length * 2, 60)))
+    if chunk_count > 1 and duration >= 600:
+        chunk_duration = duration / chunk_count
+        chunk_candidates = []
+        by_chunk = [[] for _ in range(chunk_count)]
+        for candidate in sorted(ranked, key=lambda item: (-item.score, item.start)):
+            idx = min(int(candidate.evidence["event_time"] // chunk_duration), chunk_count - 1)
+            by_chunk[idx].append(candidate)
+
+        # First pass: pick top candidate from each temporal chunk
+        for chunk in by_chunk:
+            for candidate in chunk:
+                duplicate = any(
+                    interval_iou(candidate, other) > config.max_iou
+                    or max(0.0, candidate.start - other.end, other.start - candidate.end) < config.min_gap_seconds
+                    for other in chunk_candidates
+                )
+                if not duplicate:
+                    chunk_candidates.append(candidate)
+                    break
+
+        # Second pass: fill remaining slots with highest-scoring global candidates
+        for candidate in sorted(ranked, key=lambda item: (-item.score, item.start, item.evidence["event_time"])):
+            if len(chunk_candidates) >= count:
+                break
+            duplicate = any(
+                interval_iou(candidate, other) > config.max_iou
+                or max(0.0, candidate.start - other.end, other.start - candidate.end) < config.min_gap_seconds
+                for other in chunk_candidates
+            )
+            if not duplicate:
+                chunk_candidates.append(candidate)
+        selected = chunk_candidates[:count]
+    else:
+        selected = []
+        for candidate in sorted(ranked, key=lambda item: (-item.score, item.start, item.evidence["event_time"])):
+            duplicate = any(
+                interval_iou(candidate, other) > config.max_iou
+                or max(0.0, candidate.start - other.end, other.start - candidate.end) < config.min_gap_seconds
+                for other in selected
+            )
+            if not duplicate:
+                selected.append(candidate)
+            if len(selected) == count:
+                break
     return selected

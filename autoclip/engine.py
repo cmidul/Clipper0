@@ -395,8 +395,8 @@ def process(path: Path, settings: Settings, *, count: int = 3, clip_length: floa
     ranking = RankingSettings.from_file(ranking_config)
     video_filter(layout, resolution, aspect_ratio)
     crf = compression_crf(compression)
-    if not math.isfinite(clip_length) or not 15 <= clip_length <= 60 or not 1 <= count <= 3:
-        raise ClipError("Choose 1–3 clips and a clip length between 15 and 60 seconds.")
+    if not math.isfinite(clip_length) or not 15 <= clip_length <= 60 or not 1 <= count <= 10:
+        raise ClipError("Choose 1–10 clips and a clip length between 15 and 60 seconds.")
     if fps not in {30, 60}:
         raise ClipError("Output FPS must be 30 or 60.")
     if (start is None) != (end is None):

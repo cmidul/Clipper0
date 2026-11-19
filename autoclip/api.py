@@ -72,7 +72,7 @@ class FramingRequest(BaseModel):
 
 class JobOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    max_clips: int = Field(default=3, ge=1, le=3, strict=True)
+    max_clips: int = Field(default=3, ge=1, le=10, strict=True)
     clip_length: float = Field(default=30, ge=15, le=60)
     layout_mode: Literal["pad", "crop"] = "pad"
     aspect_ratio: AspectRatio = "9:16"

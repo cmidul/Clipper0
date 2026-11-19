@@ -156,5 +156,26 @@ class RankingTests(unittest.TestCase):
             self.assertIn("amazing", manifest["clips"][0]["evidence"]["cue_matches"])
 
 
+    def test_max_clips_up_to_ten_and_temporal_chunking(self):
+        # 11 clips should be rejected
+        with self.assertRaises(ClipError):
+            select_candidates([0.01] * 120, 120, 15, count=11)
+
+        # 30-minute recording (1800 seconds) with events in various segments
+        duration = 1800
+        activity = [0.001] * duration
+        # Place peaks in 10 different temporal regions (e.g. at minutes 1, 4, 7, 10, 13, 16, 19, 22, 25, 28)
+        event_seconds = [60, 240, 420, 600, 780, 960, 1140, 1320, 1500, 1680]
+        for sec in event_seconds:
+            activity[sec] = 1.0
+
+        candidates = select_candidates(activity, duration, clip_length=30, count=10)
+        self.assertEqual(len(candidates), 10)
+        # Verify that selected candidates span across the recording rather than clustering in one corner
+        starts = [c.start for c in candidates]
+        self.assertLess(min(starts), 200)
+        self.assertGreater(max(starts), 1400)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -162,7 +162,7 @@ class ApiTests(unittest.TestCase):
 
     def test_validation_and_queued_cancellation(self):
         media = self.imported()
-        for options in ({"max_clips": 4}, {"start": 1}, {"start": 0, "end": 5},
+        for options in ({"max_clips": 11}, {"start": 1}, {"start": 0, "end": 5},
                         {"start": 80, "end": 100}, {"path": "private"}, {"max_clips": True}):
             response = self.client.post("/jobs", json={"media_id": media["id"], **options})
             self.assertEqual(response.status_code, 422, response.text)

@@ -664,7 +664,18 @@ export default function Workspace() {
             <div className="settings-heading"><h3>Clip settings</h3></div>
             <ExportControls settings={exportSettings} onChange={setExportSettings} media={pendingFile ? undefined : selectedMedia} disabled={busy} />
             <div className="form-grid two">
-              <label>Clip count<select value={count} onChange={(event) => setCount(event.target.value)} disabled={busy || manual}><option value="1">Up to 1 clip</option><option value="2">Up to 2 clips</option><option value="3">Up to 3 clips</option></select></label>
+              <label>Clip count<select value={count} onChange={(event) => setCount(event.target.value)} disabled={busy || manual}>
+                <option value="1">Up to 1 clip</option>
+                <option value="2">Up to 2 clips</option>
+                <option value="3">Up to 3 clips</option>
+                <option value="4">Up to 4 clips</option>
+                <option value="5">Up to 5 clips</option>
+                <option value="6">Up to 6 clips</option>
+                <option value="7">Up to 7 clips</option>
+                <option value="8">Up to 8 clips</option>
+                <option value="9">Up to 9 clips</option>
+                <option value="10">Up to 10 clips</option>
+              </select></label>
               <label>Length (seconds)<input type="number" min="15" max="60" step="any" value={length} onChange={(event) => setLength(event.target.value)} required disabled={busy || manual} /></label>
               {!framing&&<label>Layout<select value={layout} onChange={(event) => setLayout(event.target.value as Layout)} disabled={busy}><option value="pad">Fit full frame</option><option value="crop">Center crop</option></select></label>}
               <label>Frame rate<select value={fps} onChange={(event) => setFps(event.target.value)} disabled={busy}><option value="30">30 FPS</option><option value="60">60 FPS</option></select></label>

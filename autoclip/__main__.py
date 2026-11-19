@@ -22,7 +22,7 @@ def main() -> int:
 
     clip = commands.add_parser("clip", help="Find audio candidates and render MP4 clips.")
     clip.add_argument("input", type=Path)
-    clip.add_argument("--count", type=int, choices=range(1, 4), default=3)
+    clip.add_argument("--count", type=int, choices=range(1, 11), default=3)
     clip.add_argument("--length", type=float, default=30, help="Candidate length in seconds, 15–60.")
     clip.add_argument("--layout", choices=["pad", "crop"], default="pad")
     clip.add_argument("--aspect-ratio", choices=tuple(ASPECT_RATIOS), default="9:16",
