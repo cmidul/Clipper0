@@ -41,7 +41,7 @@ export type Resolution = typeof VIDEO_QUALITY_OPTIONS[number]["value"];
 export type Compression = typeof COMPRESSION_OPTIONS[number]["value"];
 export type FocusPoint = { x: number; y: number };
 export type FocusRegion = FocusPoint & { width: number; height: number };
-export type FramingMode = "auto" | "smart_crop" | "streamer_gameplay" | "full_gameplay";
+export type FramingMode = "auto" | "focus_crop" | "hybrid_focus" | "full_gameplay" | "streamer_gameplay" | "smart_crop";
 export type FramingOptions = {
   mode: FramingMode;
   focus_point?: FocusPoint | null;
@@ -54,6 +54,18 @@ export type FramingOptions = {
   safe_margin_top?: number;
   safe_margin_bottom?: number;
   emphasis_zoom?: boolean;
+  foreground_zoom?: number;
+  auto_focus?: boolean;
+  smooth_tracking?: boolean;
+  lock_position?: boolean;
+};
+export const DEFAULT_FRAMING: FramingOptions = {
+  mode: "hybrid_focus", background: "blur", tracking_intensity: 0.5, subtitle_position: "auto",
+  foreground_zoom: 1, auto_focus: true, smooth_tracking: true, lock_position: false,
+};
+export const FRAMING_LABELS: Record<FramingMode, string> = {
+  focus_crop: "Focus Crop", hybrid_focus: "Hybrid Focus", full_gameplay: "Full Frame",
+  auto: "Auto", streamer_gameplay: "Streamer + gameplay", smart_crop: "Smart tracking crop (legacy)",
 };
 export type FramingPlan = {
   start: number; end: number; source_width: number; source_height: number;
@@ -94,6 +106,7 @@ export type Job = {
   transcript_reuse_kind?: string | null;
   kind?: "render" | "frame_preview";
   frame_url?: string | null;
+  frame_framing_mode?: FramingMode | null;
   elapsed_seconds: number | null;
   created_at: string;
   options: {
@@ -146,10 +159,17 @@ export function apiPath(path: string): string {
   return `${API}${path}`;
 }
 
+export function processorErrorMessage(message: string): string {
+  const failedTool = /^(ffmpeg|ffprobe)(?:\.exe)? failed\./i.exec(message)?.[1].toLowerCase();
+  if (failedTool === "ffmpeg") return "FFmpeg could not process this recording. Retry or try another recording.";
+  if (failedTool === "ffprobe") return "FFprobe could not read this recording. Check that the file plays and try importing it again.";
+  return message;
+}
+
 export function errorDetail(payload: unknown, status: number): string {
   if (payload && typeof payload === "object" && "detail" in payload) {
     const detail = payload.detail;
-    if (typeof detail === "string") return detail;
+    if (typeof detail === "string") return processorErrorMessage(detail);
     if (Array.isArray(detail)) {
       return detail.map((item) => typeof item?.msg === "string" ? item.msg : "Invalid field").join(" · ");
     }

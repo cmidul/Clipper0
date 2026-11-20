@@ -14,7 +14,7 @@ import threading
 import uuid
 
 from .engine import (ClipError, JobCancelled, Settings, inspect_media, process,
-                     processing_control, run_tool, worker_lock, write_manifest)
+                     processing_control, run_tool, validate_framing_source, worker_lock, write_manifest)
 from .store import Store
 
 
@@ -253,10 +253,33 @@ class Service:
             write_manifest(directory, manifest)
             partial = directory / "frame.partial.jpg"
             try:
+                filters = ["-map", "0:V:0", "-filter_threads", "1", "-vf", "scale='min(960,iw)':-2"]
+                composition = options.get("composition")
+                if composition is not None:
+                    from .composition import build_filtergraph
+                    from .reframing import FramingSettings
+                    from .vision import plan_candidate_framing
+
+                    start, end = composition["start"], composition["end"]
+                    if not (start <= time < end <= duration and 15 <= end - start <= 60):
+                        raise ClipError("Composition preview timestamp must be inside a valid clip interval.")
+                    video = inspect_media(source, self.settings)
+                    validate_framing_source(video)
+                    framing = FramingSettings.from_dict(composition["framing"])
+                    plan, effective, _ = plan_candidate_framing(
+                        video, start, end, framing, self.settings,
+                        aspect_ratio=composition["aspect_ratio"], source_sha256=media["sha256"])
+                    graph = build_filtergraph(plan, effective, aspect_ratio=composition["aspect_ratio"],
+                                              resolution=composition["resolution"])
+                    # Input seeking starts at the requested still. Restore clip-relative
+                    # timestamps to evaluate the same tracking and emphasis expressions.
+                    timeline = f"[0:V:0]setpts=PTS+{time-start:.6f}/TB[preview];"
+                    filters = ["-map", graph.output_label, "-filter_complex_threads", "1", "-filter_complex",
+                               timeline + graph.filtergraph.replace("[0:V:0]", "[preview]")]
+                    manifest["selected_mode"] = plan.selected_mode
                 run_tool([self.settings.ffmpeg, "-nostdin", "-v", "error", "-n", "-threads", "1",
                           "-protocol_whitelist", "file,pipe", "-ss", f"{time:.6f}", "-i", str(source),
-                          "-map", "0:V:0", "-frames:v", "1", "-an", "-sn", "-dn",
-                          "-filter_threads", "1", "-vf", "scale='min(960,iw)':-2", "-q:v", "3",
+                          *filters, "-frames:v", "1", "-an", "-sn", "-dn", "-q:v", "3",
                           "-threads", "1", str(partial)], timeout=60)
                 if not partial.is_file() or partial.stat().st_size == 0:
                     raise ClipError("No frame is available at this timestamp. Try an earlier time.")

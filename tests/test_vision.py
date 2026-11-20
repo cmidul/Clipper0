@@ -12,11 +12,11 @@ import numpy as np
 
 from autoclip.engine import Media, Settings
 from autoclip.reframing import CropKeyframe, FocusPoint, FramingPlan, FramingSettings, Region
-from autoclip.vision import analyze_candidate, analyze_frames, plan_from_analysis, scene_change, smooth_track
+from autoclip.vision import ANALYSIS_VERSION, analyze_candidate, analyze_frames, plan_from_analysis, scene_change, smooth_track
 
 
 def evidence(kind="face", confidence=0.88):
-    return {"version": 1, "scene_count": 1, "sample_count": 45, "webcam_confidence": 0,
+    return {"version": ANALYSIS_VERSION, "scene_count": 1, "sample_count": 45, "webcam_confidence": 0,
             "samples": [{"time": float(t), "scene": 0, "x": 0.45 + t * 0.002, "y": 0.5,
                          "kind": kind, "confidence": confidence, "energy": 0.8,
                          "region": {"x": 0.42 + t*0.002, "y": 0.4, "width": 0.06, "height": 0.1}}
@@ -38,7 +38,7 @@ class VisualDecisionTests(unittest.TestCase):
 
     def test_persistent_face_selects_crop_but_low_confidence_preserves(self):
         plan, _ = plan_from_analysis(self.media, 0, 15, FramingSettings(), evidence())
-        self.assertEqual(plan.selected_mode, "smart_crop")
+        self.assertEqual(plan.selected_mode, "focus_crop")
         self.assertEqual(len(plan.keyframes), 15)
         weak, _ = plan_from_analysis(self.media, 0, 15, FramingSettings(), evidence(confidence=0.3))
         self.assertEqual(weak.selected_mode, "full_gameplay")
@@ -57,7 +57,7 @@ class VisualDecisionTests(unittest.TestCase):
     def test_webcam_requires_confident_boundary_and_manual_override_wins(self):
         data = evidence()
         data.update(webcam_region={"x": 0, "y": 0, "width": 0.2, "height": 0.2}, webcam_confidence=0.9)
-        plan, effective = plan_from_analysis(self.media, 0, 15, FramingSettings(), data)
+        plan, effective = plan_from_analysis(self.media, 0, 15, FramingSettings(mode="streamer_gameplay"), data)
         self.assertEqual(plan.selected_mode, "streamer_gameplay")
         self.assertIsNotNone(effective.webcam_region)
         manual = FramingSettings(mode="smart_crop", focus_point=FocusPoint(1, 0.5))
@@ -65,6 +65,24 @@ class VisualDecisionTests(unittest.TestCase):
         self.assertEqual(plan.selected_mode, "smart_crop")
         self.assertEqual(len(plan.keyframes), 1)
         self.assertEqual(plan.keyframes[0].crop.x + plan.keyframes[0].crop.width, 1920)
+
+    def test_persistent_central_activity_uses_wider_crop_and_static_toggle(self):
+        data = evidence("central_activity", 0.61)
+        plan, _ = plan_from_analysis(self.media, 0, 15, FramingSettings(smooth_tracking=False), data)
+        self.assertEqual(plan.selected_mode, "hybrid_focus")
+        self.assertEqual(len(plan.keyframes), 1)
+        weak, _ = plan_from_analysis(self.media, 0, 15, FramingSettings(mode="hybrid_focus"), evidence(confidence=0.3))
+        self.assertEqual(weak.selected_mode, "hybrid_focus")
+        self.assertEqual(len(weak.keyframes), 1)
+        self.assertEqual(weak.confidence, 0)
+
+    def test_roi_excludes_outside_targets_and_lock_bypasses_analysis(self):
+        roi = Region(0.65, 0.4, 0.10, 0.15)
+        framing = FramingSettings(mode="hybrid_focus", focus_region=roi, lock_position=True)
+        locked, _ = plan_from_analysis(self.media, 0, 15, framing, {})
+        self.assertEqual(len(locked.keyframes), 1)
+        limited, _ = plan_from_analysis(self.media, 0, 15, replace(framing, lock_position=False), evidence())
+        self.assertEqual(locked.keyframes, limited.keyframes)
 
     def test_smoothing_limits_pan_and_resets_at_scene_cut(self):
         data = evidence()["samples"]

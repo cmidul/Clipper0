@@ -210,12 +210,27 @@ class InitialPlanTests(unittest.TestCase):
                 self.assertEqual(plan.selected_mode, "full_gameplay")
                 self.assertEqual(plan.confidence, 0)
                 self.assertEqual(plan.keyframes, ())
-                self.assertIn("not implemented", plan.fallback_reason)
+                self.assertIn("No reliable visual focus", plan.fallback_reason)
 
     def test_explicit_full_gameplay_needs_no_fallback_explanation(self):
         plan = self.plan(FramingSettings(mode="full_gameplay"))
         self.assertEqual(plan.selected_mode, "full_gameplay")
         self.assertIsNone(plan.fallback_reason)
+
+    def test_manual_spatial_crops_and_auto_zoom_are_bounded_for_each_ratio(self):
+        for ratio in ("9:16", "16:9", "1:1", "4:5"):
+            for mode in ("focus_crop", "hybrid_focus", "auto"):
+                with self.subTest(mode=mode, ratio=ratio):
+                    settings = FramingSettings(mode=mode, foreground_zoom=1.5, focus_point=FocusPoint(1, 1))
+                    plan = build_initial_plan(1920, 1080, 0, 15, settings, aspect_ratio=ratio)
+                    self.assertEqual(plan.selected_mode, "focus_crop" if mode == "auto" else mode)
+                    crop = plan.keyframes[0].crop
+                    unzoomed = crop_for_focus(1920, 1080, FocusPoint(1, 1), aspect_ratio=ratio,
+                                               mode=plan.selected_mode)
+                    self.assertLess(crop.width, unzoomed.width)
+                    self.assertLess(crop.height, unzoomed.height)
+                    self.assertEqual(crop.x + crop.width, 1920)
+                    self.assertEqual(crop.y + crop.height, 1080)
 
     def test_manual_focus_produces_static_crop_for_each_ratio(self):
         for mode in ("auto", "smart_crop"):

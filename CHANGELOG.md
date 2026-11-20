@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — 2026-11-20
+
+- Compacted the workspace, recording import, and empty states. Grouped clipping settings and moved advanced framing into a collapsible section.
+
+- Simplified the framing dropdown to Focus Crop, Hybrid Focus, Full Frame, and Auto. Existing clips and saved legacy framing settings remain available.
+
+- Added Focus Crop and Hybrid Focus, normalized focus and region editing, foreground zoom, and position locking. Composition stills and exports share the planner and FFmpeg graph.
+- Fixed zoom for manually positioned Auto framing and bounded sampled analysis on both frame axes.
+- Updated Windows setup, local demo steps, contribution guidance, and third-party notices for the beta audit. See the release-readiness report for verification and pending acceptance.
+
 ## Unreleased — 2026-11-19
 
 - New recording opens an empty workspace. Choose recording opens the file picker. Pending job and preview responses cannot reopen the workspace the user left.

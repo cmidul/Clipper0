@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import FramingEditor from "../components/FramingEditor";
 import { framingError } from "../lib/framing";
-import { apiPath, apiRequest, ASPECT_RATIO_OPTIONS, COMPRESSION_OPTIONS, formatSize, formatTime, intervalError,
-  isActive, outputDimensions, uploadFile, VIDEO_QUALITY_OPTIONS, type AspectRatio, type AssetDeletionResult,
+import { apiPath, apiRequest, ASPECT_RATIO_OPTIONS, COMPRESSION_OPTIONS, DEFAULT_FRAMING, FRAMING_LABELS, formatSize, formatTime, intervalError,
+  isActive, outputDimensions, processorErrorMessage, uploadFile, VIDEO_QUALITY_OPTIONS, type AspectRatio, type AssetDeletionResult,
   type Candidate, type Compression, type FramingOptions, type Job, type Media, type Resolution, type ReviewState } from "../lib/api";
 
 type Connection = { state: "checking" | "online" | "offline" | "degraded"; message: string };
@@ -17,6 +17,10 @@ function exportSettingsFromJob(job?: Job): ExportSettings {
     resolution: job?.options.resolution ?? 720,
     compression: job?.options.compression ?? "balanced",
   };
+}
+
+function framingFromJob(job?: Job): FramingOptions | null {
+  return job ? job.options.framing ?? null : DEFAULT_FRAMING;
 }
 
 function ExportControls({ settings, onChange, media, disabled, revision }: {
@@ -121,15 +125,14 @@ function CandidateCard({ candidate, duration, media, initialLayout, initialExpor
         <span className={`review-label ${candidate.review_state}`}>{candidate.review_state}</span></div>
       <div className="clip-meta"><span>{(candidate.end - candidate.start).toFixed(1)} sec</span>
         <span>Heuristic score {candidate.score.toFixed(2)}</span></div>
-      {candidate.framing&&<p className="framing-result">{candidate.framing.selected_mode.replaceAll("_"," ")}
-        {candidate.framing.fallback_reason?` · ${candidate.framing.fallback_reason}`:` · framing confidence ${Math.round(candidate.framing.confidence*100)}% (heuristic/manual)`}
-        {candidate.visual_analysis?.cache_hit?" · Visual analysis reused":""}</p>}
+      {candidate.framing&&<p className="framing-result">{FRAMING_LABELS[candidate.framing.selected_mode]}
+        {candidate.framing.fallback_reason?` · ${candidate.framing.fallback_reason}`:` · Estimated framing confidence ${Math.round(candidate.framing.confidence*100)}%`}</p>}
       <div className="review-actions">
         <button type="button" aria-pressed={candidate.review_state === "approved"} className="approve-button" disabled={busy}
-          onClick={() => review(candidate.review_state === "approved" ? "proposed" : "approved")}>✓ Approve</button>
+          onClick={() => review(candidate.review_state === "approved" ? "proposed" : "approved")}>Approve</button>
         <button type="button" aria-pressed={candidate.review_state === "rejected"} className="reject-button" disabled={busy}
-          onClick={() => review(candidate.review_state === "rejected" ? "proposed" : "rejected")}>× Reject</button>
-        <a className="download-button" href={apiPath(candidate.download_url)}>↓ Download</a>
+          onClick={() => review(candidate.review_state === "rejected" ? "proposed" : "rejected")}>Reject</button>
+        <a className="download-button" href={apiPath(candidate.download_url)}>Download</a>
       </div>
       <details className="clip-details"><summary>Adjust clip</summary>
         <form onSubmit={render} className="revision-form">
@@ -141,7 +144,8 @@ function CandidateCard({ candidate, duration, media, initialLayout, initialExpor
           <ExportControls settings={exportSettings} onChange={setExportSettings} media={media} disabled={busy} revision />
           <FramingEditor value={framing} onChange={setFraming} mediaId={media?.id} width={media?.width} height={media?.height}
             duration={duration} initialTime={candidate.start} ratio={exportSettings.aspectRatio} resolution={exportSettings.resolution}
-            disabled={busy} plan={candidate.framing}/>
+            disabled={busy} plan={candidate.framing} interval={{start:Number(start),end:Number(end)}}
+            original={{settings:initialFraming,ratio:initialExportSettings.aspectRatio}}/>
           <button type="submit" className="secondary-button" disabled={busy}>{busy ? "Saving…" : "Render revision"}</button>
         </form>
       </details>
@@ -185,7 +189,7 @@ export default function Workspace() {
   const [layout, setLayout] = useState<Layout>("pad");
   const [exportSettings, setExportSettings] = useState(() => exportSettingsFromJob());
   const { aspectRatio, resolution, compression } = exportSettings;
-  const [framing, setFraming] = useState<FramingOptions|null>({mode:"auto",background:"blur",tracking_intensity:0.5,subtitle_position:"auto"});
+  const [framing, setFraming] = useState<FramingOptions|null>(DEFAULT_FRAMING);
   const [fps, setFps] = useState("30");
   const [speech, setSpeech] = useState("captions");
   const [language, setLanguage] = useState("auto");
@@ -251,6 +255,8 @@ export default function Workspace() {
           setSelectedMediaId(latestJob?.media_id || mediaResult.value[0]?.id || null);
           setSelectedJobId(latestJob?.id || null);
           setExportSettings(exportSettingsFromJob(latestJob));
+          setFraming(framingFromJob(latestJob));
+          setLayout(latestJob?.options.layout ?? "pad");
         }
         if (checkHealth) setConnection(healthResult.status === "fulfilled"
           ? { state: "online", message: "Processor connected" }
@@ -326,7 +332,7 @@ export default function Workspace() {
     setLength("30");
     setLayout("pad");
     setExportSettings(exportSettingsFromJob());
-    setFraming({ mode: "auto", background: "blur", tracking_intensity: 0.5, subtitle_position: "auto" });
+    setFraming(DEFAULT_FRAMING);
     setFps("30");
     setSpeech("captions");
     setLanguage("auto");
@@ -417,6 +423,8 @@ export default function Workspace() {
     setSelectedMediaId(record.id);
     setSelectedJobId(latestJob?.id || null);
     setExportSettings(exportSettingsFromJob(latestJob));
+    setFraming(framingFromJob(latestJob));
+    setLayout(latestJob?.options.layout ?? "pad");
     setPendingFile(null);
     setManualEnd(String(Math.min(30, record.duration)));
   }
@@ -426,6 +434,8 @@ export default function Workspace() {
     setSelectedMediaId(job.media_id);
     setSelectedJobId(job.id);
     setExportSettings(exportSettingsFromJob(job));
+    setFraming(framingFromJob(job));
+    setLayout(job.options.layout ?? "pad");
     setPendingFile(null);
   }
 
@@ -542,6 +552,8 @@ export default function Workspace() {
       acceptJob(job, version);
       if (version === workspaceVersion.current) {
         setExportSettings(exportSettingsFromJob(job));
+        setFraming(framingFromJob(job));
+        setLayout(job.options.layout ?? "pad");
         setNotice("Revision queued. The original clip remains in job history.");
       }
     } finally {
@@ -552,15 +564,14 @@ export default function Workspace() {
   return <div className="app-shell">
     <aside className="sidebar">
       <a className="brand" href="/" aria-label="Clipper0 home"><span className="brand-mark" aria-hidden="true">▥</span><span>Clipper0</span></a>
-      <div className="workspace-label"><span className="workspace-dot" />Local workspace</div>
       <button ref={newRecordingButton} type="button" className="new-recording" onClick={resetWorkspace}><span aria-hidden="true">＋</span> New recording</button>
-      <div className="sidebar-section-label">RECORDINGS <span>{media.length}</span></div>
+      <div className="sidebar-section-label">Recordings <span>{media.length}</span></div>
       <nav className="recording-list" aria-label="Imported recordings">
-        {media.length === 0 && <p className="sidebar-empty">Your imported recordings will appear here.</p>}
+        {media.length === 0 && <p className="sidebar-empty">No recordings imported</p>}
         {media.map((record) => <div key={record.id} className="project-row">
           <button type="button" disabled={busy || projectAction !== null} className={`recording-item ${record.id === selectedMediaId ? "selected" : ""}`}
             onClick={() => selectMedia(record)} title={record.filename} aria-pressed={record.id === selectedMediaId}>
-            <span className="recording-icon" aria-hidden="true">▷</span><span className="recording-item-text"><strong>{record.filename}</strong>
+            <span className="recording-item-text"><strong>{record.filename}</strong>
               <small>{assetStatusLabels[record.asset_status] || <>{formatTime(record.duration)} <span>·</span> {formatSize(record.size_bytes)}</>}</small></span>
           </button>
           <details className="project-actions" onKeyDown={(event) => {
@@ -588,7 +599,7 @@ export default function Workspace() {
         <summary id="archived-projects-summary">Archived Projects ({archivedMedia.length})</summary>
         {archivedMedia.length === 0 ? <p className="sidebar-empty">No archived projects.</p> :
           <ul>{archivedMedia.map((record) => <li key={record.id}>
-            <span title={record.filename}>{record.filename}
+            <span className="archived-recording"><span title={record.filename}>{record.filename}</span>
               {assetStatusLabels[record.asset_status] && <small> · {assetStatusLabels[record.asset_status]}</small>}
             </span>
             <button type="button" disabled={projectAction !== null} onClick={() => void restoreProject(record)}>
@@ -634,34 +645,38 @@ export default function Workspace() {
     </dialog>
 
     <main className="main-workspace">
-      <header className="workspace-header"><div><div className="breadcrumb">WORKSPACE <span>/</span> RECORDINGS</div><h1>Clip workspace<span className="heading-dot">.</span></h1></div>
+      <header className="workspace-header"><h1>Workspace</h1>
         <div className="header-actions">{activeJobs > 0 && <span className="active-count">{activeJobs} active {activeJobs === 1 ? "job" : "jobs"}</span>}
           <button type="button" className="refresh-button" disabled={refreshing} onClick={() => { refreshWorkspace.current?.(); setCandidateRefresh((value) => value + 1); }} aria-label="Refresh workspace"><span aria-hidden="true">↻</span> {refreshing ? "Syncing…" : "Refresh"}</button></div></header>
 
       {(connection.state === "offline" || connection.state === "degraded") && <section className="connection-banner" role="status"><div><strong>Processor unavailable</strong><p>{connection.message}</p>
-        <code>.\.venv\Scripts\python.exe -m autoclip serve</code></div><button type="button" className="secondary-button" onClick={() => refreshWorkspace.current?.()}>Retry connection</button></section>}
+        <details><summary>Start the local processor</summary><code>.\.venv\Scripts\python.exe -m autoclip serve</code></details></div><button type="button" className="secondary-button" onClick={() => refreshWorkspace.current?.()}>Retry connection</button></section>}
       {error && <div className="message error-message" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)} aria-label="Dismiss error">×</button></div>}
       {notice && <div className="message notice-message" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice(null)} aria-label="Dismiss notification">×</button></div>}
 
       <div className="workspace-grid">
         <section className="setup-panel" aria-labelledby="recording-heading">
-          <div className="panel-heading"><h2 id="recording-heading">Recording</h2><span className="local-label">On this computer</span></div>
+          <div className="panel-heading"><h2 id="recording-heading">Recording</h2></div>
           {!selectedAssetsAvailable && <p role="status" className="inline-error">
             {assetStatusLabels[selectedAssetStatus] || "Deleting files…"} · Import the original recording to render new clips.
           </p>}
           <input ref={fileInput} type="file" accept=".mp4,.mkv,video/mp4,video/x-matroska" className="file-input" aria-label="Choose recording file" disabled={busy}
             onChange={(event) => { chooseFile(event.target.files?.[0]); event.target.value = ""; }} />
-          <div className={`upload-zone ${dragging ? "dragging" : ""} ${pendingFile || selectedMedia ? "has-file" : ""}`}
+          <div className={`upload-zone ${dragging ? "dragging" : ""}`}
             onDragOver={(event) => { event.preventDefault(); if (!busy) setDragging(true); }} onDragLeave={() => setDragging(false)}
             onDrop={(event) => { event.preventDefault(); setDragging(false); chooseFile(event.dataTransfer.files[0]); }}>
-            <div className="upload-symbol" aria-hidden="true">↑</div>
-            {pendingFile || selectedMedia ? <><h3 title={pendingFile?.name || selectedMedia?.filename}>{pendingFile?.name || selectedMedia?.filename}</h3>
+            <div className="upload-description">{pendingFile || selectedMedia ? <><h3 title={pendingFile?.name || selectedMedia?.filename}>{pendingFile?.name || selectedMedia?.filename}</h3>
               <p>{pendingFile ? `${formatSize(pendingFile.size)} · Ready to import` : `${formatTime(selectedMedia!.duration)} · ${selectedMedia!.width}×${selectedMedia!.height} · ${formatSize(selectedMedia!.size_bytes)}`}</p></>
-              : <><h3>Drop your recording here</h3><p>MP4 or MKV · Stored locally</p></>}
-            <button type="button" className="choose-button" disabled={busy} onClick={() => fileInput.current?.click()}>{pendingFile || selectedMedia ? "Choose another file" : "Choose recording"}<span aria-hidden="true">↗</span></button>
+              : <h3>Drop an MP4 or MKV here</h3>}</div>
+            <button type="button" className="choose-button" disabled={busy} onClick={() => fileInput.current?.click()}>{pendingFile || selectedMedia ? "Choose another file" : "Choose recording"}</button>
           </div>
           <form className="settings-form" onSubmit={generate}>
-            <div className="settings-heading"><h3>Clip settings</h3></div>
+            <button className="generate-button" type="submit" disabled={busy || !selectedAssetsAvailable || (!pendingFile && !selectedMedia) || connection.state !== "online"}>
+              {busy ? (uploading ? "Importing…" : "Creating job…") : manual ? "Render selected interval" : "Generate candidates"}</button>
+            {uploading && <div className="upload-progress" role="status"><div><span>{uploadPercent === 100 ? "Validating recording…" : "Importing recording…"}</span><span>{uploadPercent}%</span></div><progress value={uploadPercent} max={100} aria-label="Upload progress" />
+              <button type="button" className="text-button" onClick={() => operation.current?.abort()}>Cancel upload</button></div>}
+            <section className="settings-section" aria-labelledby="basic-settings-heading">
+            <h3 className="settings-heading" id="basic-settings-heading">Basic Settings</h3>
             <ExportControls settings={exportSettings} onChange={setExportSettings} media={pendingFile ? undefined : selectedMedia} disabled={busy} />
             <div className="form-grid two">
               <label>Clip count<select value={count} onChange={(event) => setCount(event.target.value)} disabled={busy || manual}>
@@ -676,57 +691,59 @@ export default function Workspace() {
                 <option value="9">Up to 9 clips</option>
                 <option value="10">Up to 10 clips</option>
               </select></label>
-              <label>Length (seconds)<input type="number" min="15" max="60" step="any" value={length} onChange={(event) => setLength(event.target.value)} required disabled={busy || manual} /></label>
+              <label>Duration (seconds)<input type="number" min="15" max="60" step="any" value={length} onChange={(event) => setLength(event.target.value)} required disabled={busy || manual} /></label>
               {!framing&&<label>Layout<select value={layout} onChange={(event) => setLayout(event.target.value as Layout)} disabled={busy}><option value="pad">Fit full frame</option><option value="crop">Center crop</option></select></label>}
               <label>Frame rate<select value={fps} onChange={(event) => setFps(event.target.value)} disabled={busy}><option value="30">30 FPS</option><option value="60">60 FPS</option></select></label>
               <label>Speech<select value={speech} onChange={(event) => setSpeech(event.target.value)} disabled={busy}><option value="captions">Captions + cues</option><option value="speech">Speech cues only</option><option value="audio">Audio only</option></select></label>
             </div>
             {speech !== "audio" && <label>Spoken language<input list="languages" value={language} pattern="auto|[a-z]{2,3}" onChange={(event) => setLanguage(event.target.value.toLowerCase())} required disabled={busy} title="Use auto or a language code such as en or bn" />
               <datalist id="languages"><option value="auto">Auto-detect</option><option value="en">English</option><option value="bn">Bengali</option><option value="hi">Hindi</option><option value="ar">Arabic</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option><option value="ja">Japanese</option><option value="zh">Chinese</option></datalist></label>}
-            <FramingEditor key={workspaceKey} value={framing} onChange={setFraming} mediaId={selectedAssetsAvailable ? selectedMedia?.id : undefined} width={selectedMedia?.width} height={selectedMedia?.height}
-              duration={selectedMedia?.duration} ratio={aspectRatio} resolution={resolution} disabled={busy}/>
             <label className="checkbox-label"><input type="checkbox" checked={manual} onChange={(event) => setManual(event.target.checked)} disabled={busy} />Choose timestamps manually</label>
             {manual && <div className="form-grid two"><label>Start (seconds)<input type="number" step="any" min="0" value={manualStart} onChange={(event) => setManualStart(event.target.value)} required disabled={busy} /></label>
               <label>End (seconds)<input type="number" step="any" min="0" value={manualEnd} onChange={(event) => setManualEnd(event.target.value)} required disabled={busy} /></label></div>}
-            {uploading && <div className="upload-progress" role="status"><div><span>{uploadPercent === 100 ? "Validating recording…" : "Importing recording…"}</span><span>{uploadPercent}%</span></div><progress value={uploadPercent} max={100} aria-label="Upload progress" />
-              <button type="button" className="text-button" onClick={() => operation.current?.abort()}>Cancel upload</button></div>}
-            <button className="generate-button" type="submit" disabled={busy || !selectedAssetsAvailable || (!pendingFile && !selectedMedia) || connection.state !== "online"}>
-              {busy ? (uploading ? "Importing…" : "Creating job…") : manual ? "Render selected interval" : "Generate candidates"}<span aria-hidden="true">↗</span></button>
+            </section>
+            <FramingEditor key={workspaceKey} value={framing} onChange={setFraming} mediaId={selectedAssetsAvailable ? selectedMedia?.id : undefined} width={selectedMedia?.width} height={selectedMedia?.height}
+              duration={selectedMedia?.duration} ratio={aspectRatio} resolution={resolution} disabled={busy}
+              interval={manual?{start:Number(manualStart),end:Number(manualEnd)}:undefined}/>
           </form>
         </section>
 
+        <div className="review-workspace">
         <section className="results-panel" aria-labelledby="candidates-heading">
           <div className="results-heading"><h2 id="candidates-heading">Candidate clips <span>{candidates.length}</span></h2>
             <div className="filter-tabs" aria-label="Filter candidates"><button type="button" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>All</button>
               <button type="button" aria-pressed={filter === "approved"} onClick={() => setFilter("approved")}>Approved {candidates.filter((candidate) => candidate.review_state === "approved").length}</button></div></div>
           {selectedJob && <div className={`job-status ${selectedJob.state}`}>
-            <div className="job-status-top"><div><span className="job-kind">{selectedJob.source_candidate_id ? "TIMESTAMP REVISION" : "CANDIDATE RUN"}</span><h3>{phaseLabels[selectedJob.phase] || selectedJob.phase}</h3></div><StateBadge job={selectedJob} /></div>
+            <div className="job-status-top"><div><span className="job-kind">{selectedJob.source_candidate_id ? "Timestamp revision" : "Candidate run"}</span><h3>{phaseLabels[selectedJob.phase] || selectedJob.phase}</h3></div><StateBadge job={selectedJob} /></div>
             {isActive(selectedJob) && <><progress value={selectedJob.progress_pct} max={100} aria-label="Processing progress" /><div className="job-progress-footer"><span>{selectedJob.progress_pct}% · Stage progress</span>
               <button type="button" disabled={selectedJob.cancel_requested} onClick={() => cancelJob(selectedJob)}>{selectedJob.cancel_requested ? "Cancelling…" : "Cancel job"}</button></div></>}
-            {selectedJob.error_message && <p role="alert" className="job-error">{selectedJob.error_message}</p>}
+            {selectedJob.error_message && <p role="alert" className="job-error">{processorErrorMessage(selectedJob.error_message)}</p>}
             {selectedJob.state === "completed" && <p className="job-complete-detail">{selectedJob.elapsed_seconds !== null ? `Processing time ${selectedJob.elapsed_seconds.toFixed(1)}s` : "Processing finished"}
-              {selectedJob.caption_status === "no_speech" ? " · No speech detected" : selectedJob.language ? ` · ${selectedJob.language.toUpperCase()} speech` : ""}
-              {selectedJob.transcript_cache_hit ? " · Transcript reused" : ""}</p>}
+              {selectedJob.caption_status === "no_speech" ? " · No speech detected" : selectedJob.language ? ` · ${selectedJob.language.toUpperCase()} speech` : ""}</p>}
           </div>}
 
-          {candidatesLoading ? <div className="empty-state" role="status"><div className="empty-symbol">↻</div><h3>Loading clips…</h3></div>
+          {candidatesLoading ? <div className="empty-state" role="status"><h3>Loading clips…</h3></div>
             : shownCandidates.length > 0 ? <div className="candidate-grid">{shownCandidates.map((candidate) => <CandidateCard key={candidate.id} candidate={candidate} duration={selectedMedia?.duration ?? candidate.end}
               media={selectedMedia} initialFraming={selectedJob?.options.framing||null}
               initialLayout={selectedJob?.options.layout || "pad"} initialExportSettings={exportSettingsFromJob(selectedJob)} onReview={reviewCandidate} onRender={renderCandidate} />)}</div>
-            : <div className="empty-state"><div className="empty-film" aria-hidden="true"><span>▷</span></div>
-              <h3>{filter === "approved" && candidates.length ? "No approved clips yet" : selectedJob && isActive(selectedJob) ? "Your clips are on their way" : selectedJob?.state === "completed" ? "No candidates found" : selectedJob?.state === "failed" || selectedJob?.state === "cancelled" ? "No clips available for this job" : "Your review starts here"}</h3>
-              <p>{filter === "approved" && candidates.length ? "Approve a candidate to find it here." : selectedJob && isActive(selectedJob) ? "Progress updates automatically. You can return to this job later." : selectedJob?.diagnostic ? "No moment met the ranking threshold. Try a manual interval or another recording." : "Import a recording and generate candidates to preview, adjust, and download."}</p></div>}
+            : <div className="empty-state">
+              <h3>{filter === "approved" && candidates.length ? "No approved clips yet" : selectedJob && isActive(selectedJob) ? "Clips are pending" : selectedJob?.state === "completed" ? "No candidates found" : selectedJob?.state === "failed" || selectedJob?.state === "cancelled" ? "No clips available for this job" : "No clips yet"}</h3>
+              {filter === "approved" && candidates.length ? <p>Approve a candidate to find it here.</p>
+                : selectedJob?.state === "completed" ? <p>Try a manual interval or another recording.</p>
+                : !selectedJob && <p>Import a recording and generate highlights to get started.</p>}</div>}
         </section>
-      </div>
 
-      <section className="history-panel" aria-labelledby="history-heading"><div className="panel-heading"><h2 id="history-heading">Job history</h2><span>{selectedMedia ? selectedMedia.filename : "Select a recording to view its jobs"}</span></div>
-        {recentJobs.length === 0 ? <p className="history-empty">Processing jobs will appear here, including after a restart.</p>
-          : <div className="job-list">{recentJobs.map((job) => <button key={job.id} type="button" disabled={busy} className={`job-row ${job.id === selectedJobId ? "selected" : ""}`} aria-pressed={job.id === selectedJobId} onClick={() => selectJob(job)}>
-            <span className="job-row-icon" aria-hidden="true">{job.source_candidate_id ? "↻" : "▷"}</span>
-            <span className="job-row-name"><strong>{media.find((record) => record.id === job.media_id)?.filename || "Imported recording"}</strong><small>{job.source_candidate_id ? "Timestamp revision" : "Candidate run"} · {new Date(job.created_at).toLocaleString()}</small></span>
-            <StateBadge job={job} /><span className="job-row-arrow" aria-hidden="true">↗</span></button>)}</div>}
+      <section className="history-panel" aria-labelledby="history-heading"><div className="panel-heading"><h2 id="history-heading">Job history</h2>{selectedMedia && <span title={selectedMedia.filename}>{selectedMedia.filename}</span>}</div>
+        {recentJobs.length === 0 ? <div className="history-empty"><h3>No processing jobs</h3><p>Your processing history will appear here.</p></div>
+          : <div className="job-list">{recentJobs.map((job) => {
+            const filename = media.find((record) => record.id === job.media_id)?.filename || "Imported recording";
+            return <button key={job.id} type="button" disabled={busy} className={`job-row ${job.id === selectedJobId ? "selected" : ""}`} aria-pressed={job.id === selectedJobId} onClick={() => selectJob(job)}>
+              <span className="job-row-name"><strong title={filename}>{filename}</strong><small>{job.source_candidate_id ? "Timestamp revision" : "Candidate run"} · {new Date(job.created_at).toLocaleString()}</small></span>
+              <StateBadge job={job} /></button>;
+          })}</div>}
       </section>
-      <footer className="workspace-footer"><span>Clipper0</span><span>Review candidates before sharing.</span></footer>
+        </div>
+      </div>
     </main>
   </div>;
 }

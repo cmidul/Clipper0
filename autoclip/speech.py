@@ -226,7 +226,7 @@ def subtitle_time(seconds: float, *, ass: bool = False) -> str:
 
 def write_subtitles(segments: list[dict], start: float, end: float, stem: Path, *,
                     resolution: int = 720, aspect_ratio: str = "9:16",
-                    framing=None, layout_mode: str | None = None) -> Path | None:
+                    framing=None, layout_mode: str | None = None, framing_plan=None) -> Path | None:
     width, height = output_dimensions(resolution, aspect_ratio)
     relative = clip_segments(segments, start, end)
     if not relative:
@@ -259,6 +259,13 @@ def write_subtitles(segments: list[dict], start: float, end: float, stem: Path, 
             y = max(top, min(bottom, panel_boundary + font_size))
         elif position == "auto" and layout_mode == "full_gameplay" and aspect_ratio == "9:16":
             y = max(top, min(bottom, height * 0.78))
+        elif position == "auto" and layout_mode == "hybrid_focus" and framing_plan is not None:
+            crop = framing_plan.keyframes[0].crop
+            foreground_height = min(height, width * crop.height / crop.width)
+            if top + font_size <= (height - foreground_height) / 2 and bottom - font_size < (height + foreground_height) / 2:
+                y = top
+            else:
+                y = bottom
         else:
             y = bottom
         position_override = f"{{\\an5\\pos({width // 2},{round(y)})}}"

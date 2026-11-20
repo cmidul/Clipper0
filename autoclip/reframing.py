@@ -13,7 +13,9 @@ from .engine import ASPECT_RATIOS, ClipError
 
 
 PLAN_VERSION = 1
-FRAMING_MODES = frozenset({"smart_crop", "streamer_gameplay", "full_gameplay", "auto"})
+SPATIAL_MODES = frozenset({"focus_crop", "hybrid_focus"})
+CROP_MODES = SPATIAL_MODES | {"smart_crop"}
+FRAMING_MODES = CROP_MODES | {"streamer_gameplay", "full_gameplay", "auto"}
 SUBTITLE_POSITIONS = frozenset({"auto", "top", "center", "bottom"})
 SUPPORTED_ASPECT_RATIOS = frozenset(ASPECT_RATIOS)
 
@@ -81,16 +83,22 @@ class FramingSettings:
     safe_margin_bottom: float = 0.15
     background: str = "blur"
     emphasis_zoom: bool = False
+    foreground_zoom: float = 1.0
+    auto_focus: bool = True
+    smooth_tracking: bool = True
+    lock_position: bool = False
 
     def __post_init__(self) -> None:
         _choice(self.mode, FRAMING_MODES, "framing mode")
         _choice(self.subtitle_position, SUBTITLE_POSITIONS, "subtitle position")
         _choice(self.background, frozenset({"blur", "pad"}), "background")
         _number(self.tracking_intensity, "Tracking intensity", 0, 1)
+        _number(self.foreground_zoom, "Foreground zoom", 1, 2)
         for name in ("safe_margin_horizontal", "safe_margin_top", "safe_margin_bottom"):
             _number(getattr(self, name), name, 0, 0.4)
-        if not isinstance(self.emphasis_zoom, bool):
-            raise ClipError("Emphasis zoom must be a boolean.")
+        for name in ("emphasis_zoom", "auto_focus", "smooth_tracking", "lock_position"):
+            if not isinstance(getattr(self, name), bool):
+                raise ClipError(f"{name} must be a boolean.")
         if self.focus_point is not None and not isinstance(self.focus_point, FocusPoint):
             raise ClipError("Focus point must use validated source coordinates.")
         for name in ("focus_region", "webcam_region"):
@@ -151,7 +159,8 @@ def _source_dimensions(width: int, height: int) -> None:
 
 
 def crop_for_focus(source_width: int, source_height: int,
-                   focus: FocusPoint | None = None, *, aspect_ratio: str = "9:16") -> CropRect:
+                   focus: FocusPoint | None = None, *, aspect_ratio: str = "9:16",
+                   mode: str = "smart_crop", zoom: float = 1) -> CropRect:
     """Largest exact-ratio even crop, centered on focus and clamped to source.
 
     An even multiple of the ratio's integer components avoids chroma rounding
@@ -159,6 +168,8 @@ def crop_for_focus(source_width: int, source_height: int,
     """
     _source_dimensions(source_width, source_height)
     _choice(aspect_ratio, SUPPORTED_ASPECT_RATIOS, "aspect ratio")
+    _choice(mode, CROP_MODES, "crop mode")
+    _number(zoom, "Foreground zoom", 1, 2)
     focus = FocusPoint(0.5, 0.5) if focus is None else focus
     if not isinstance(focus, FocusPoint):
         raise ClipError("Focus must be a validated focus point.")
@@ -166,7 +177,14 @@ def crop_for_focus(source_width: int, source_height: int,
     units = min(source_width // (2 * ratio_width), source_height // (2 * ratio_height))
     if units < 1:
         raise ClipError("Source frame is too small for an exact-ratio even crop.")
-    width, height = 2 * ratio_width * units, 2 * ratio_height * units
+    if mode == "hybrid_focus":
+        # Interpolate from the whole source toward an output-shaped crop.
+        # Zoom shrinks source coverage while keeping foreground placement stable.
+        width = max(2, math.floor((0.35 * source_width + 0.65 * 2 * ratio_width * units) / (2 * zoom)) * 2)
+        height = max(2, math.floor((0.35 * source_height + 0.65 * 2 * ratio_height * units) / (2 * zoom)) * 2)
+    else:
+        units = max(1, math.floor(units / zoom))
+        width, height = 2 * ratio_width * units, 2 * ratio_height * units
     max_x, max_y = (source_width - width) // 2 * 2, (source_height - height) // 2 * 2
     x = round((focus.x * source_width - width / 2) / 2) * 2
     y = round((focus.y * source_height - height / 2) / 2) * 2
@@ -263,9 +281,17 @@ class FramingPlan:
             if previous_size is not None and size != previous_size:
                 raise ClipError("Initial framing plans require a fixed crop size.")
             previous_time, previous_scene, previous_size = frame.time, frame.scene_id, size
-        if self.selected_mode == "smart_crop" and (
+        if self.selected_mode in CROP_MODES and (
                 not self.keyframes or self.keyframes[0].time != 0):
-            raise ClipError("Smart crop plans must begin with a keyframe at clip time zero.")
+            raise ClipError("Crop plans must begin with a keyframe at clip time zero.")
+
+
+def uses_visual_analysis(settings: FramingSettings) -> bool:
+    if settings.mode == "full_gameplay" or not settings.auto_focus or settings.lock_position:
+        return False
+    if settings.focus_point is not None or settings.webcam_region is not None:
+        return False
+    return settings.focus_region is None or settings.mode in SPATIAL_MODES | {"auto"}
 
 
 def build_initial_plan(source_width: int, source_height: int, start: float, end: float,
@@ -301,21 +327,31 @@ def build_initial_plan(source_width: int, source_height: int, start: float, end:
     focus = settings.focus_point
     if settings.focus_region is not None:
         focus = settings.focus_region.center
-    if focus is None:
-        return result("full_gameplay", 0, reason=(
-            "Automatic visual analysis is not implemented yet and no manual focus was supplied; "
-            "preserving the full frame."
-        ))
-    try:
-        crop = crop_for_focus(source_width, source_height, focus, aspect_ratio=aspect_ratio)
-    except ClipError:
-        # Source/ratio/selection were already validated. Tiny frames cannot
-        # support exact-ratio even crops, but may still be fitted safely.
-        return result("full_gameplay", 0, reason="Source is too small for the requested crop; preserving the full frame.")
-    if settings.focus_region is not None:
-        coverage = region_coverage(crop, settings.focus_region, source_width, source_height)
-        if coverage < 0.98:
-            return result("full_gameplay", 0, reason=(
-                "The requested focus region cannot fit safely in one crop; preserving the full frame."
-            ))
-    return result("smart_crop", 1, frames=(CropKeyframe(0, crop, 1),))
+    if focus is None and settings.mode not in SPATIAL_MODES:
+        if settings.mode == "auto" and (not settings.auto_focus or settings.lock_position):
+            focus = FocusPoint(0.5, 0.5)
+        else:
+            return result("full_gameplay", 0, reason="No reliable visual focus; preserving the full frame.")
+    if settings.mode in SPATIAL_MODES:
+        modes = (settings.mode,)
+    elif settings.mode == "auto" and (not settings.auto_focus or settings.lock_position):
+        modes = ("hybrid_focus",)
+    elif settings.mode == "auto" and settings.foreground_zoom != 1:
+        modes = ("focus_crop", "hybrid_focus")
+    else:
+        modes = ("smart_crop", "hybrid_focus") if settings.mode == "auto" else ("smart_crop",)
+    for mode in modes:
+        zoom = settings.foreground_zoom if mode in SPATIAL_MODES else 1
+        try:
+            crop = crop_for_focus(source_width, source_height, focus, aspect_ratio=aspect_ratio,
+                                  mode=mode, zoom=zoom)
+        except ClipError:
+            return result("full_gameplay", 0, reason="Source is too small for the requested crop; preserving the full frame.")
+        if settings.focus_region is not None and (
+                region_coverage(crop, settings.focus_region, source_width, source_height) < 0.98):
+            continue
+        confidence = float(focus is not None and (settings.focus_point is not None or settings.focus_region is not None))
+        return result(mode, confidence, frames=(CropKeyframe(0, crop, confidence),))
+    return result("full_gameplay", 0, reason=(
+        "The requested focus region cannot fit safely in one crop; preserving the full frame."
+    ))

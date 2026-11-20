@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { apiPath, apiRequest, ASPECT_RATIO_OPTIONS, COMPRESSION_OPTIONS, errorDetail, formatTime,
-  intervalError, localApiBase, outputSizeLabel, VIDEO_QUALITY_OPTIONS } from "../lib/api.ts";
+  intervalError, localApiBase, outputSizeLabel, processorErrorMessage, VIDEO_QUALITY_OPTIONS } from "../lib/api.ts";
 
 test("shape, resolution, and compression have separate selector choices", () => {
   assert.deepEqual(ASPECT_RATIO_OPTIONS, [
@@ -52,6 +52,15 @@ test("API validation and storage errors produce readable feedback", () => {
   assert.equal(errorDetail({ detail: "Missing executable" }, 503), "Missing executable");
   assert.equal(errorDetail({ detail: [{ msg: "Invalid interval" }] }, 422), "Invalid interval");
   assert.match(errorDetail(null, 500), /500/);
+});
+
+test("processor feedback keeps actionable errors and omits raw encoder and probe logs", () => {
+  assert.equal(processorErrorMessage("Choose an MP4 or MKV recording."), "Choose an MP4 or MKV recording.");
+  assert.equal(processorErrorMessage("ffmpeg.exe exceeded its 60s time limit."), "ffmpeg.exe exceeded its 60s time limit.");
+  assert.equal(processorErrorMessage("ffmpeg.exe failed. [encoder] internal output"),
+    "FFmpeg could not process this recording. Retry or try another recording.");
+  assert.equal(errorDetail({ detail: "ffprobe failed. internal output" }, 422),
+    "FFprobe could not read this recording. Check that the file plays and try importing it again.");
 });
 
 test("API client surfaces failures and preserves abort cancellation", async () => {

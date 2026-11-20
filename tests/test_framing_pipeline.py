@@ -50,7 +50,7 @@ class FramingPipelineTests(unittest.TestCase):
         with patch("autoclip.engine.inspect_media", return_value=self.media), \
                 patch("autoclip.engine.audio_activity", return_value=[]), \
                 patch("autoclip.engine.select_candidates", side_effect=select), \
-                patch("autoclip.reframing.build_initial_plan", side_effect=plan), \
+                patch("autoclip.vision.build_initial_plan", side_effect=plan), \
                 patch("autoclip.engine.render_clip", side_effect=encode):
             process(self.media.path, self.settings, framing=framing,
                     progress_callback=lambda value: phases.append(value["phase"]))
@@ -89,7 +89,7 @@ class FramingPipelineTests(unittest.TestCase):
     def test_default_calls_keep_unframed_options_and_manifest(self):
         with patch("autoclip.engine.inspect_media", return_value=self.media), \
                 patch("autoclip.engine.render_clip", side_effect=self.encode) as render, \
-                patch("autoclip.reframing.build_initial_plan") as planner:
+                patch("autoclip.vision.build_initial_plan") as planner:
             process(self.media.path, self.settings, start=10, end=25)
             planner.assert_not_called()
             self.assertNotIn("framing_plan", render.call_args.kwargs)
@@ -128,7 +128,7 @@ class FramingPipelineTests(unittest.TestCase):
             return result
 
         with patch("autoclip.engine.inspect_media", return_value=self.media), \
-                patch("autoclip.reframing.build_initial_plan", side_effect=plan), \
+                patch("autoclip.vision.build_initial_plan", side_effect=plan), \
                 patch("autoclip.engine.render_clip") as render:
             with self.assertRaises(JobCancelled):
                 process(self.media.path, self.settings, start=10, end=25,

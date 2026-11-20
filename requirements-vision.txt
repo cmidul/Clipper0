@@ -1,3 +1,3 @@
-# CPU visual analysis; runtime verification pending.
+# CPU visual analysis, verified on Windows x64 / Python 3.14.
 numpy==2.5.5
 opencv-python-headless==4.14.0.94

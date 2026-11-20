@@ -1,5 +1,6 @@
 """Real upload, durable processing, revision and restart checks."""
 
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -7,6 +8,8 @@ import time
 import unittest
 from unittest.mock import patch
 
+import cv2
+import numpy as np
 from fastapi.testclient import TestClient
 
 from autoclip.api import create_app
@@ -24,6 +27,78 @@ class BackendIntegrationTests(unittest.TestCase):
                 return job
             time.sleep(0.02)
         self.fail("Job did not reach a terminal state within 60 seconds")
+
+    def test_ranked_clip_spatial_revision_matches_still_and_persists(self):
+        with tempfile.TemporaryDirectory(prefix="autoclip-spatial-beta-") as directory:
+            root = Path(directory)
+            source = root / "disposable.mp4"
+            run_tool(["ffmpeg", "-nostdin", "-v", "error", "-n",
+                      "-f", "lavfi", "-i", "color=gray:s=320x180:r=10:d=20",
+                      "-f", "lavfi", "-i", "sine=f=440:r=48000:d=20",
+                      "-vf", "drawbox=x=288:y=0:w=32:h=180:color=blue:t=fill",
+                      "-af", "volume=0:enable='lt(t,8)+gte(t,9)'",
+                      "-c:v", "libx264", "-threads", "1", "-c:a", "aac", str(source)])
+            settings = Settings(root / "data", threads=1)
+            with patch.dict(os.environ, {"AUTOCLIP_DB_PATH": str(root / "queue.sqlite3")}):
+                with TestClient(create_app(settings), base_url="http://127.0.0.1") as client:
+                    upload = client.post("/media/import?filename=disposable.mp4", content=source.read_bytes())
+                    self.assertEqual(upload.status_code, 201, upload.text)
+                    media_id = upload.json()["id"]
+                    initial = client.post("/jobs", json={"media_id": media_id, "max_clips": 1,
+                        "clip_length": 15, "resolution": 480, "framing": {"mode": "full_gameplay", "background": "pad"}})
+                    self.assertEqual(initial.status_code, 202, initial.text)
+                    first_job = self.wait_for_job(client, initial.json()["id"])
+                    self.assertEqual(first_job["state"], "completed", first_job)
+                    [first] = client.get(f"/jobs/{first_job['id']}/candidates").json()
+                    interval = {key: first[key] for key in ("start", "end")}
+                    framing = {"mode": "focus_crop", "focus_point": {"x": 1, "y": 0.5},
+                               "auto_focus": False, "foreground_zoom": 1.5}
+                    response = client.post(f"/media/{media_id}/frames", json={"time": first["start"] + 1,
+                        "composition": {**interval, "framing": framing, "aspect_ratio": "9:16", "resolution": 480}})
+                    self.assertEqual(response.status_code, 202, response.text)
+                    preview = self.wait_for_job(client, response.json()["id"])
+                    self.assertEqual(preview["state"], "completed", preview)
+                    self.assertEqual(preview["frame_framing_mode"], "focus_crop")
+                    image = client.get(preview["frame_url"])
+                    self.assertEqual(image.status_code, 200)
+                    still = cv2.imdecode(np.frombuffer(image.content, np.uint8), cv2.IMREAD_COLOR)
+                    self.assertEqual(still.shape[:2], (854, 480))
+
+                    response = client.post(f"/candidates/{first['id']}/render", json={**interval, "framing": framing})
+                    self.assertEqual(response.status_code, 202, response.text)
+                    revised_job = self.wait_for_job(client, response.json()["id"])
+                    self.assertEqual(revised_job["state"], "completed", revised_job)
+                    [revised] = client.get(f"/jobs/{revised_job['id']}/candidates").json()
+                    self.assertEqual(revised["source_candidate_id"], first["id"])
+                    self.assertEqual(client.get(revised["preview_url"], headers={"Range": "bytes=0-15"}).status_code, 206)
+                    for name, candidate in (("full", first), ("focus", revised)):
+                        download = client.get(candidate["download_url"])
+                        self.assertEqual(download.status_code, 200)
+                        (root / f"{name}.mp4").write_bytes(download.content)
+
+                focus = root / "focus.mp4"
+                probe = json.loads(run_tool(["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(focus)]))
+                video, audio = probe["streams"]
+                self.assertEqual((video["codec_name"], video["width"], video["height"]), ("h264", 480, 854))
+                self.assertEqual(video["sample_aspect_ratio"], "1:1")
+                self.assertEqual(video["display_aspect_ratio"], "240:427")  # 9:16 rounded to even dimensions.
+                self.assertEqual(audio["codec_name"], "aac")
+                self.assertAlmostEqual(float(video["start_time"]), float(audio["start_time"]), delta=0.05)
+                self.assertAlmostEqual(float(video["duration"]), 15, delta=0.1)
+                self.assertAlmostEqual(float(video["duration"]), float(audio["duration"]), delta=0.1)
+                frames = {}
+                for name in ("full", "focus"):
+                    run_tool(["ffmpeg", "-nostdin", "-v", "error", "-ss", "1", "-i", str(root / f"{name}.mp4"),
+                              "-frames:v", "1", "-threads", "1", str(root / f"{name}.png")])
+                    frames[name] = cv2.imread(str(root / f"{name}.png"))
+                self.assertLess(int(frames["full"][200, 410, 0]), 20)
+                self.assertGreater(int(frames["focus"][200, 410, 0]), 150)
+                difference = np.abs(still.astype(np.int16) - frames["focus"].astype(np.int16))
+                self.assertLess(float(difference.mean()), 5)
+                with TestClient(create_app(settings), base_url="http://127.0.0.1") as client:
+                    reopened = client.get(f"/jobs/{revised_job['id']}").json()
+                    self.assertEqual(reopened["options"]["framing"]["foreground_zoom"], 1.5)
+                    self.assertEqual(client.get(f"/media/{media_id}").status_code, 200)
 
     def test_real_upload_render_review_revision_and_restart(self):
         root = Path("local-data/test-runs").resolve()

@@ -40,6 +40,8 @@ class FramingApiTests(unittest.TestCase):
     def test_supported_options_persist_and_convert_to_engine_settings(self):
         for framing in (
             {"mode": "full_gameplay", "background": "pad"},
+            {"mode": "focus_crop", "foreground_zoom": 1.5, "auto_focus": False, "lock_position": True},
+            {"mode": "hybrid_focus", "smooth_tracking": False},
             {"mode": "smart_crop", "focus_point": {"x": 0.8, "y": 0.5}},
             {"mode": "smart_crop", "focus_region": {"x": 0.4, "y": 0.3, "width": 0.1, "height": 0.2}},
             {"mode": "streamer_gameplay", "webcam_region": {"x": 0, "y": 0, "width": 0.2, "height": 0.2}},
@@ -121,7 +123,8 @@ class FramingApiTests(unittest.TestCase):
         fields = schemas["FramingRequest"]["properties"]
         self.assertEqual(set(fields), {"mode", "focus_point", "focus_region", "webcam_region", "background",
             "tracking_intensity", "emphasis_zoom", "subtitle_position", "safe_margin_horizontal",
-            "safe_margin_top", "safe_margin_bottom"})
+            "safe_margin_top", "safe_margin_bottom", "foreground_zoom", "auto_focus", "smooth_tracking",
+            "lock_position"})
         self.assertIn("framing", schemas["JobRequest"]["properties"])
         self.assertIn("framing", schemas["RenderRequest"]["properties"])
 

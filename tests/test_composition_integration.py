@@ -47,8 +47,8 @@ class CompositionIntegrationTests(unittest.TestCase):
     def render(self, mode, *, background="pad", webcam=None, focus=None, track=None, emphasis=False,
                aspect_ratio="9:16", resolution=720, expected_size=(720, 1280)):
         frames = ()
-        if mode == "smart_crop":
-            frames = (CropKeyframe(0, crop_for_focus(640, 360, focus, aspect_ratio=aspect_ratio), 1),)
+        if mode in {"smart_crop", "focus_crop", "hybrid_focus"}:
+            frames = (CropKeyframe(0, crop_for_focus(640, 360, focus, aspect_ratio=aspect_ratio, mode=mode), 1),)
         if track is not None:
             frames = track
         plan = FramingPlan(640, 360, 0, 15, mode, mode, 1, keyframes=frames,
@@ -58,7 +58,7 @@ class CompositionIntegrationTests(unittest.TestCase):
             aspect_ratio=aspect_ratio, resolution=resolution,
         )
         name = self._testMethodName
-        if (aspect_ratio, resolution) != ("9:16", 720):
+        if (aspect_ratio, resolution) != ("9:16", 720) or mode in {"focus_crop", "hybrid_focus"}:
             name += f"-{mode}-{aspect_ratio.replace(':', 'x')}-{resolution}"
         destination = self.directory / f"{name}.mp4"
         self.command([
@@ -137,6 +137,41 @@ class CompositionIntegrationTests(unittest.TestCase):
         self.assert_blue(self.pixel(pixels, 442, 640))
         red, green, blue = self.pixel(pixels, 277, 640)
         self.assertLess(max(red, green, blue) - min(red, green, blue), 15)
+
+    def test_spatial_modes_enlarge_the_selected_gameplay(self):
+        full = self.render("full_gameplay")
+        hybrid = self.render("hybrid_focus", focus=FocusPoint(1, 0.5))
+        focus = self.render("focus_crop", focus=FocusPoint(1, 0.5))
+        self.assertLess(max(self.pixel(full, 699, 420)), 10)
+        self.assert_blue(self.pixel(hybrid, 699, 420))
+        self.assertLess(max(self.pixel(hybrid, 699, 100)), 10)
+        self.assert_blue(self.pixel(focus, 699, 100))
+
+    def test_spatial_modes_encode_each_shape_and_resolution(self):
+        sizes = {
+            "9:16": [(480, 854), (720, 1280), (1080, 1920)],
+            "16:9": [(854, 480), (1280, 720), (1920, 1080)],
+            "1:1": [(480, 480), (720, 720), (1080, 1080)],
+            "4:5": [(480, 600), (720, 900), (1080, 1350)],
+        }
+        for mode in ("focus_crop", "hybrid_focus"):
+            for ratio, canvases in sizes.items():
+                crop = crop_for_focus(640, 360, FocusPoint(1, 0.5), aspect_ratio=ratio, mode=mode)
+                plan = FramingPlan(640, 360, 0, 15, mode, mode, 1, keyframes=(CropKeyframe(0, crop, 1),))
+                for tier, size in zip((480, 720, 1080), canvases, strict=True):
+                    with self.subTest(mode=mode, ratio=ratio, resolution=tier):
+                        graph = build_filtergraph(plan, FramingSettings(mode=mode, background="blur"),
+                                                  aspect_ratio=ratio, resolution=tier)
+                        output = self.directory / f"{mode}-{ratio.replace(':', 'x')}-{tier}.mp4"
+                        self.command([self.ffmpeg, "-nostdin", "-v", "error", "-n", "-i", str(self.source),
+                                      "-filter_complex_threads", "1", "-filter_complex", graph.filtergraph,
+                                      "-map", graph.output_label, "-frames:v", "1", "-c:v", "libx264",
+                                      "-preset", "ultrafast", "-threads", "1", str(output)])
+                        probe = json.loads(self.command([self.ffprobe, "-v", "error", "-select_streams", "v:0",
+                            "-show_entries", "stream=codec_name,width,height,sample_aspect_ratio", "-of", "json",
+                            str(output)]))["streams"][0]
+                        self.assertEqual((probe["width"], probe["height"]), size)
+                        self.assertEqual((probe["codec_name"], probe["sample_aspect_ratio"]), ("h264", "1:1"))
 
     def test_moving_crop_reaches_both_sides_without_retiming(self):
         frames = (CropKeyframe(0, crop_for_focus(640, 360, FocusPoint(0, 0.5)), 1),

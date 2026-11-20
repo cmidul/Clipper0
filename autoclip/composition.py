@@ -40,6 +40,28 @@ def _crop_filter(crop: CropRect) -> str:
     return f"crop={crop.width}:{crop.height}:{crop.x}:{crop.y}"
 
 
+def _tracked_crop(plan: FramingPlan) -> str:
+    crop = plan.keyframes[0].crop
+    return (f"crop={crop.width}:{crop.height}:"
+            f"x='{position_expression(plan, 'x')}':y='{position_expression(plan, 'y')}'")
+
+
+def crop_fills_canvas(crop: CropRect, width: int, height: int) -> bool:
+    return crop.width * height == crop.height * width
+
+
+def _blurred_composition(width: int, height: int, foreground: str) -> str:
+    small_width, small_height = width // 4 // 2 * 2, height // 4 // 2 * 2
+    return (
+        "[0:V:0]split=2[bgsrc][fgsrc];"
+        f"[bgsrc]{_fill(small_width, small_height)},boxblur=8:2,"
+        f"scale={width}:{height},setsar=1[bg];"
+        f"[fgsrc]{foreground},setsar=1[fg];"
+        "[bg][fg]overlay=x=(W-w)/2:y=(H-h)/2:shortest=1,"
+        "format=yuv420p,setsar=1[framed]"
+    )
+
+
 def split_panel_heights(height: int) -> tuple[int, int]:
     top = round(height * 0.30 / 2) * 2
     return top, height - top
@@ -91,15 +113,7 @@ def build_filtergraph(plan: FramingPlan, settings: FramingSettings, *,
         else:
             # Blur at reduced resolution to limit CPU cost; only the background
             # is cropped. The foreground retains the complete original frame.
-            small_width, small_height = width // 4 // 2 * 2, height // 4 // 2 * 2
-            graph = (
-                "[0:V:0]split=2[bgsrc][fgsrc];"
-                f"[bgsrc]{_fill(small_width, small_height)},boxblur=8:2,"
-                f"scale={width}:{height},setsar=1[bg];"
-                f"[fgsrc]{_scale_down(width, height)},setsar=1[fg];"
-                "[bg][fg]overlay=x=(W-w)/2:y=(H-h)/2:shortest=1,"
-                "format=yuv420p,setsar=1[framed]"
-            )
+            graph = _blurred_composition(width, height, _scale_down(width, height))
     elif mode == "streamer_gameplay":
         if settings.webcam_region is None:
             raise ClipError("Select a webcam region before rendering split screen.")
@@ -113,17 +127,25 @@ def build_filtergraph(plan: FramingPlan, settings: FramingSettings, *,
             f"[gamesrc]{_fit(width, bottom_height)}[game];"
             "[cam][game]vstack=inputs=2:shortest=1,format=yuv420p,setsar=1[framed]"
         )
-    elif mode == "smart_crop":
+    elif mode in {"smart_crop", "focus_crop"}:
         crop = plan.keyframes[0].crop
         ratio_width, ratio_height = ASPECT_RATIOS[aspect_ratio]
         if crop.width * ratio_height != crop.height * ratio_width:
             raise ClipError("Planned crop aspect ratio must match the output aspect ratio.")
-        graph = (f"[0:V:0]crop={crop.width}:{crop.height}:"
-                 f"x='{position_expression(plan, 'x')}':y='{position_expression(plan, 'y')}',"
-                 f"{_fit(width, height)},format=yuv420p[framed]")
+        fit = _fit(width, height) if mode == "smart_crop" else _fill(width, height)
+        graph = f"[0:V:0]{_tracked_crop(plan)},{fit},format=yuv420p[framed]"
+    elif mode == "hybrid_focus":
+        scale = (f"scale={width}:{height}:force_original_aspect_ratio=decrease:"
+                 "force_divisible_by=2:reset_sar=1")
+        foreground = f"{_tracked_crop(plan)},{scale}"
+        if settings.background == "pad" or crop_fills_canvas(plan.keyframes[0].crop, width, height):
+            graph = (f"[0:V:0]{foreground},pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+                     "setsar=1,format=yuv420p[framed]")
+        else:
+            graph = _blurred_composition(width, height, foreground)
     else:
         raise ClipError("The framing plan has no supported resolved layout.")
-    if settings.emphasis_zoom and mode == "smart_crop" and plan.confidence >= 0.85 and plan.emphasis_times:
+    if settings.emphasis_zoom and mode in {"smart_crop", "focus_crop"} and plan.confidence >= 0.85 and plan.emphasis_times:
         # A <=3% smooth, two-second pulse, no frame duplication or retiming.
         pulses = "+".join(f"if(between(t,{time-1:.4f},{time+1:.4f}),"
                           f"(1+cos(PI*(t-{time:.4f})))/2,0)" for time in plan.emphasis_times)

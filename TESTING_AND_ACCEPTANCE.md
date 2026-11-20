@@ -1,6 +1,6 @@
 # Testing and Acceptance Strategy
 
-> Execute each test only after asking for specific approval as required by `AGENTS.md`.
+> Follow [AGENTS.md](AGENTS.md) for lightweight local testing, browser access, and approval for longer acceptance runs.
 
 ## Hardware-specific baseline
 Document laptop CPU/RAM/OS and version; video resolution/FPS/codec/duration; model and quantization settings; FFmpeg build; wall-clock runtime; peak memory; number of clips; subtitle quality. Repeat on desktop after migration.

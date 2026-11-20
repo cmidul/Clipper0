@@ -22,23 +22,27 @@ Installation and machine migration remain subject to the user's authorization.
 
 In the dashboard's framing controls:
 
-- **Auto** uses conservative confidence/persistence checks; uncertain cases preserve
-  the entire source. New dashboard jobs default to Auto with a blurred background.
-- **Smart tracking crop** follows sufficiently persistent face/activity evidence.
-  Activity is an explicit framing cue in this mode, not a claim about importance.
-  Unreliable tracking falls back to full gameplay.
+- **Hybrid Focus** is the default for new dashboard workspaces. It keeps a wider
+  source region than Focus Crop and fills any unused canvas with blur or padding.
+- **Focus Crop** enlarges a selected source region to fill the canvas. Set a point or
+  disable Auto Focus for a fixed crop. Weak automatic evidence can use Hybrid Focus.
+- **Auto** chooses a crop only with persistent evidence and preserves the entire
+  source when confidence is low. Older saved Smart Tracking Crop remains supported.
 - **Streamer + gameplay** fits the webcam above the entire gameplay frame. Automatic
   webcam proposals require a stable corner face and boundary evidence. Select the
-  webcam region manually when detection is uncertain. Only portrait supports split.
-- **Full gameplay** fits the whole source over a blurred or padded background.
+  webcam region manually when detection is uncertain. Split supports all four shapes.
+- **Full Frame** fits the whole source over a blurred or padded background.
 - **Legacy layout** retains the original fit/center-crop rendering path.
 
 Load a source frame after importing a recording. Click a focus point or drag a focus
 or webcam region; numeric coordinates use the normalized range 0–1. Manual focus
-is fixed and takes priority over automatic tracking. A focus region that cannot fit
-inside the crop causes a preserving fallback. Clear manual focus to restore tracking.
-The composition/crop overlay is a still-frame guide; the rendered video is authoritative.
-Preview extraction shares the single worker and can wait behind a rendering job.
+is fixed and takes priority over automatic tracking. A focus region constrains the
+tracker and can trigger a wider composition or Full Frame if the crop cannot retain it.
+Use the position sliders, foreground zoom, Lock Position, or Reset to refine the crop.
+The instant overlay is a drafting guide. Request a composition preview for a still
+rendered by the same planner and FFmpeg composition as export. The still shows caption
+guides. Final playback includes actual burned-in captions when available. Preview
+extraction shares the single worker and can wait behind a render.
 
 Adjust tracking intensity, caption position and social-interface safe margins.
 Optional emphasis uses at most three small zoom pulses, separated by eight seconds,
@@ -70,7 +74,7 @@ layout/intensity changes can reuse it. Changed intervals need new visual analysi
 | `web/lib/framing.ts` | Coordinate conversion, validation and preview geometry |
 
 Detailed analysis decodes only selected 15–60-second intervals at 3 FPS, maximum
-640-pixel width. Only metadata survives temporary frame decoding. Plans retain at
+640 pixels on either edge. Only metadata survives temporary frame decoding. Plans retain at
 most 64 keyframes. OpenCV and filter graph threads are bounded; x264 uses the existing
 configured CPU thread count. There is no GPU requirement, cloud inference or API bill.
 Manual/fitted rendering remains available if OpenCV is absent. A missing automatic

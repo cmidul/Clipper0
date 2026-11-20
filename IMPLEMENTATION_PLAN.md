@@ -1,11 +1,11 @@
-# Implementation Plan (Approval-Gated)
+# Implementation Plan
 
 ## Operating rule
-Before every file edit, command, installation, test, or Git action: propose **one** action using `AGENTS.md`, wait for a clear Yes, perform exactly that action, report results, ask again. Milestones are NOT blanket approval.
+Follow the Smart Autonomy Policy in [AGENTS.md](AGENTS.md). This plan records the original milestone order. See [progress.md](progress.md) for current implementation status and the [README](README.md) for current installation steps.
 
 ## M0 — Laptop discovery and reproducible specification
 - Ask: laptop OS/version, CPU, RAM, available SSD/HDD, disk drives, admin rights, recording resolution, expected language, and installed versions of Python, Node, FFmpeg, Git, OBS.
-- Propose individual read-only validation commands; require approval for each.
+- Use read-only checks to verify the local environment under the autonomy policy.
 - Select local paths and model parameters from measurements, not desktop assumptions.
 - Record setup requirements and known constraints.
 **Acceptance:** full laptop hardware/environment matrix; supported tool versions confirmed.

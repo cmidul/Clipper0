@@ -262,6 +262,18 @@ def video_filter(layout: str, resolution: int, aspect_ratio: str = "9:16") -> st
             f"force_divisible_by=2:reset_sar=1,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1")
 
 
+def validate_framing_source(media: Media) -> None:
+    try:
+        sar_width, sar_height = (int(part) for part in media.sample_aspect_ratio.split(":"))
+    except (ValueError, AttributeError):
+        raise ClipError("Framing requires known square-pixel source geometry.") from None
+    if sar_width <= 0 or sar_height <= 0 or sar_width != sar_height:
+        raise ClipError("Framing currently requires square-pixel source video; normalize pixel aspect first.")
+    if (media.rotation is None or not math.isfinite(media.rotation)
+            or not math.isclose(math.remainder(media.rotation, 360), 0, rel_tol=0, abs_tol=1e-6)):
+        raise ClipError("Framing currently requires unrotated source video; normalize orientation first.")
+
+
 def render_clip(media: Media, candidate: Candidate, destination: Path, settings: Settings,
                 layout: str = "pad", resolution: int = 720, fps: int = 30,
                 subtitle_path: Path | None = None, *, aspect_ratio: str = "9:16",
@@ -285,15 +297,7 @@ def render_clip(media: Media, candidate: Candidate, destination: Path, settings:
         from .reframing import FramingPlan
         if not isinstance(framing_plan, FramingPlan):
             raise ClipError("Framing plan must be a validated record.")
-        try:
-            sar_width, sar_height = (int(part) for part in media.sample_aspect_ratio.split(":"))
-        except (ValueError, AttributeError):
-            raise ClipError("Framing requires known square-pixel source geometry.") from None
-        if sar_width <= 0 or sar_height <= 0 or sar_width != sar_height:
-            raise ClipError("Framing currently requires square-pixel source video; normalize pixel aspect first.")
-        if (media.rotation is None or not math.isfinite(media.rotation)
-                or not math.isclose(math.remainder(media.rotation, 360), 0, rel_tol=0, abs_tol=1e-6)):
-            raise ClipError("Framing currently requires unrotated source video; normalize orientation first.")
+        validate_framing_source(media)
         if (framing_plan.source_width, framing_plan.source_height) != (media.width, media.height):
             raise ClipError("Framing plan dimensions do not match the source media.")
         if (not math.isclose(framing_plan.start, start, rel_tol=0, abs_tol=1e-6)
@@ -471,31 +475,19 @@ def process(path: Path, settings: Settings, *, count: int = 3, clip_length: floa
                 effective_framing = framing
                 visual_analysis = None
                 if framing is not None:
-                    from .reframing import build_initial_plan
+                    from .reframing import uses_visual_analysis
+                    from .vision import plan_candidate_framing
                     manifest["phase"] = "framing"
                     write_manifest(job_dir, manifest)
-                    framing_plan = build_initial_plan(media.width, media.height, candidate.start,
-                                                      candidate.end, framing, aspect_ratio=aspect_ratio)
-                    if (framing.mode != "full_gameplay" and framing.focus_point is None
-                            and framing.focus_region is None and framing.webcam_region is None):
-                        from .vision import analyze_candidate, plan_from_analysis
-                        from .reframing import FramingPlan
+                    if visual_source_hash is None and uses_visual_analysis(framing):
+                        from .speech import digest_file
                         try:
-                            if visual_source_hash is None:
-                                from .speech import digest_file
-                                visual_source_hash = digest_file(media.path)
-                            visual_analysis = analyze_candidate(media, candidate.start, candidate.end,
-                                                               settings, source_sha256=visual_source_hash)
-                            framing_plan, effective_framing = plan_from_analysis(
-                                media, candidate.start, candidate.end, framing, visual_analysis,
-                                aspect_ratio=aspect_ratio)
-                        except JobCancelled:
-                            raise
-                        except (ClipError, OSError) as exc:
-                            framing_plan = FramingPlan(media.width, media.height, candidate.start, candidate.end,
-                                framing.mode, "full_gameplay", 0,
-                                fallback_reason="Visual analysis unavailable; preserving the full frame.")
-                            visual_analysis = {"error": str(exc)[:500], "cache_hit": False}
+                            visual_source_hash = digest_file(media.path)
+                        except OSError:
+                            pass  # The planner reports unavailable analysis and uses its static fallback.
+                    framing_plan, effective_framing, visual_analysis = plan_candidate_framing(
+                        media, candidate.start, candidate.end, framing, settings, aspect_ratio=aspect_ratio,
+                        source_sha256=visual_source_hash)
                     check_cancelled()
                     manifest["phase"] = "rendering"
                     write_manifest(job_dir, manifest)
@@ -508,7 +500,10 @@ def process(path: Path, settings: Settings, *, count: int = 3, clip_length: floa
                                                     candidate.end, (job_dir / filename).with_suffix(""),
                                                     resolution=resolution, aspect_ratio=aspect_ratio,
                                                     **({"framing": effective_framing,
-                                                        "layout_mode": framing_plan.selected_mode} if framing_plan else {}))
+                                                        "layout_mode": framing_plan.selected_mode,
+                                                        **({"framing_plan": framing_plan}
+                                                           if framing_plan.selected_mode == "hybrid_focus" else {})}
+                                                       if framing_plan else {}))
                 framing_options = ({"framing_plan": framing_plan, "framing_settings": effective_framing}
                                    if framing_plan is not None else {})
                 render_clip(media, candidate, job_dir / filename, settings, layout, resolution, fps,

@@ -48,7 +48,7 @@ class FramingRequest(BaseModel):
     """CPU visual analysis with explicit manual overrides and safe defaults."""
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False, strict=True)
-    mode: Literal["smart_crop", "streamer_gameplay", "full_gameplay", "auto"] = "auto"
+    mode: Literal["smart_crop", "focus_crop", "hybrid_focus", "streamer_gameplay", "full_gameplay", "auto"] = "auto"
     focus_point: FocusPointRequest | None = None
     focus_region: RegionRequest | None = None
     webcam_region: RegionRequest | None = None
@@ -59,6 +59,10 @@ class FramingRequest(BaseModel):
     safe_margin_top: float = Field(default=0.08, ge=0, le=0.4)
     safe_margin_bottom: float = Field(default=0.15, ge=0, le=0.4)
     emphasis_zoom: bool = False
+    foreground_zoom: float = Field(default=1, ge=1, le=2)
+    auto_focus: bool = True
+    smooth_tracking: bool = True
+    lock_position: bool = False
 
     @model_validator(mode="after")
     def validate_settings(self):
@@ -127,9 +131,19 @@ class ReviewRequest(BaseModel):
     review_state: Literal["proposed", "approved", "rejected"]
 
 
+class CompositionPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False, strict=True)
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    aspect_ratio: AspectRatio
+    resolution: Resolution
+    framing: FramingRequest
+
+
 class FrameRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False, strict=True)
     time: float = Field(ge=0)
+    composition: CompositionPreviewRequest | None = None
 
 
 class RenderRequest(BaseModel):
@@ -181,6 +195,8 @@ def public_job(record: dict) -> dict:
     result["kind"] = "frame_preview" if result["options"].get("operation") == "frame_preview" else "render"
     result["frame_url"] = (f"/jobs/{record['id']}/frame"
                            if record["state"] == "completed" and manifest.get("frame_file") == "frame.jpg" else None)
+    if result["kind"] == "frame_preview":
+        result["frame_framing_mode"] = manifest.get("selected_mode")
     return result
 
 
@@ -328,9 +344,17 @@ def create_app(settings: Settings | None = None, *, start_worker: bool = True) -
     @app.post("/media/{media_id}/frames", status_code=202)
     def request_frame(media_id: str, body: FrameRequest):
         media = require(service().store.media(media_id), "Media")
-        if body.time >= json.loads(media["metadata_json"])["duration"]:
+        duration = json.loads(media["metadata_json"])["duration"]
+        if body.time >= duration:
             raise HTTPException(422, "Preview timestamp must be inside the recording.")
-        job = service().store.create_job(media_id, {"operation": "frame_preview", "time": body.time})
+        options = {"operation": "frame_preview", "time": body.time}
+        if body.composition is not None:
+            composition = body.composition
+            if not (composition.start <= body.time < composition.end <= duration
+                    and 15 <= composition.end - composition.start <= 60):
+                raise HTTPException(422, "Composition preview requires a 15–60 second clip and a timestamp inside it.")
+            options["composition"] = composition.model_dump()
+        job = service().store.create_job(media_id, options)
         service().wake.set()
         return public_job(job)
 

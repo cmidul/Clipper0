@@ -20,6 +20,32 @@
 
 ## Current handoff
 
+### Public beta dashboard polish — 2026-11-20
+
+- Implemented the compact Workspace header, recording drop zone, clip and job empty states, sidebar filename truncation and tooltips, and responsive review and history panels. Grouped controls into Basic Settings, Framing, and a collapsible Advanced Framing section. Kept the four public framing choices and the existing form state and submission handlers.
+- Removed redundant instructions, decorative empty-state graphics, and cache-status copy. Replaced raw FFmpeg and FFprobe output in user-facing errors with actionable messages while retaining validation errors and job status. Changes are in `web/app/page.tsx`, `web/app/globals.css`, `web/components/FramingEditor.tsx`, `web/lib/api.ts`, `web/tests/api.test.ts`, and `CHANGELOG.md`.
+- Passed all 15 frontend tests, TypeScript, an isolated production build, generated HTML and CSS checks, and `git diff --check`. The first markup check accidentally excluded the page body when stripping scripts and passed after correcting the check. No screenshot was attached to the brief. The requested viewport and live interaction checks await browser approval. The normal localhost dashboard still serves the previous build. Next step is an approved isolated visual check and, if requested, an approved frontend rollout.
+
+### Framing dropdown simplification — 2026-11-20
+
+- Live rollout completed with approval. Port 3000 had been serving the previous seven-option production build. Rebuilt and restarted the frontend only. A direct localhost HTTP check verified exactly Focus Crop, Hybrid Focus, Full Frame, and Auto, and all six referenced JavaScript assets returned HTTP 200. Backend health passed with the same backend process. No browser automation or rendering ran.
+- Completed in `web/components/FramingEditor.tsx` and `web/lib/framing.ts`. Both editors offer Focus Crop, Hybrid Focus, Full Frame, and Auto. Legacy tracking displays Focus Crop. Saved split-screen and basic framing display Full Frame. The displayed fallback leaves saved settings intact. An explicit selection, including the button for the displayed fallback, changes the draft for the next render.
+- Added regression coverage in `web/tests/framing.test.ts` and updated `CHANGELOG.md`. Passed 14 frontend tests, TypeScript, a React static markup check of the actual editor for all seven states, six API framing tests, and the existing clip preview/download/revision test. No browser automation, video rendering, or service restarts. For manual verification on a frontend serving this revision, open an older job and its Adjust clip form, confirm the four options and saved-framing notice, then check playback and download of the existing export.
+
+### Localhost browser acceptance — 2026-11-20
+
+- Passed after explicit approval. Real headless Edge used the production dashboard and isolated live localhost API. Verified upload, automatic ranking, playback and seeking, Focus Crop positioning and 1.5× zoom, the rendered still, revision playback, actual MP4 download, and restoration of both jobs and saved framing after reload.
+- First attempt timed out before upload because automation tried selecting the fixture before React connected. Waiting for the online indicator fixed the test. FFprobe verified 15 seconds and 480×854 H.264/AAC with aligned stream starts, and full decode passed. The still and revised frame differed by 0.63 mean absolute pixel levels. The download exactly matched the managed render and the fixture hash was unchanged.
+- Edge and the test services ended. Both localhost ports were free. The readiness score rose from 81 to 85 based on the verified browser workflow. Clean installation, current upstream reviews, license choice, and exact publication sign-off remain pending.
+
+### Public beta audit — 2026-11-20
+
+- Local audit and routine fixes finished. [RELEASE_READINESS.md](RELEASE_READINESS.md) records an 81/100 conditional verdict, evidence by feature, and the release gates. The existing Smart Autonomy Policy applies throughout.
+- Completed the previous spatial-cropping work in the current working tree and fixed manually positioned Auto zoom and two-axis analysis limits. Added synthetic end-to-end, planned geometry, and FFprobe regressions. API import, ranking, 15-second H.264/AAC export, byte-range preview, matching manual composition still, framing revision, download, and reopen passed. The 480×854 output is a 9:16 tier with even-pixel rounding. All 12 canvases encoded and probed for each of Focus Crop and Hybrid Focus.
+- Focused Python groups passed, including actual CPU speech, project-deletion protections, geometry/cache, and backend state handling. One invocation selected a nonexistent test class and passed after correcting the selector. Frontend passed 12 tests, TypeScript, and a production build. `pip check`, tool health, and `git diff --check` passed. The current full Python suite and new interactive dashboard acceptance were not run.
+- Updated README, laptop setup, contribution guidance, framing guide, changelog, agent guidance, and third-party inventory. Local tracked history checks did not find sensitive file paths or representative secret patterns. No private media was processed during this audit. No commit, push, publication, or visibility change was made.
+- Awaiting separate approval for disposable localhost dashboard acceptance, official upstream license/security research, and clean temporary Windows dependency/model installation. Also awaiting the owner’s project license choice and approval. Current-branch real-gameplay reframing quality remains unverified.
+
 ### 10-clip generation & chunked highlight distribution for long videos — 2026-11-20
 
 - Completed. Expanded candidate selection and export options from 3 to up to 10 clips.
@@ -127,6 +153,16 @@
 | Git state | Last inspection reported project directory was not a Git repository; no Git operation, publishing or recording upload performed |
 
 ## Active work
+
+### Release-gate preparation — 2026-11-20
+
+- Preparation and the approved browser run finished. [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) records the outcome, clean Windows plan, license options and advisory plan, and exact local release-diff checks. Test artifacts are under ignored `local-data/test-runs/browser-beta-0adef0529453484ab9daf41124337da5/`.
+- `py.exe` and `python.exe` shell aliases failed in the managed session. The full Python 3.14.7 x64 path successfully created a temporary venv and bootstrapped pip. Added the verified fallback to README. Clean dependency installation and offline app validation remain pending.
+- Local package/model metadata and Git history passed the checks in the checklist. Current upstream advisories and the upstream model license at its cached revision remain unverified until external queries are approved. No project license chosen. Current score 85/100. Blocked on clean-install and upstream access approvals.
+
+### Public beta sign-off — 2026-11-20
+
+- Blocked on the approvals listed in Current handoff. The routine development scope is complete. Resume with a bounded isolated dashboard run, verified Windows installation, upstream research, or license addition when the corresponding approval arrives. Review the release diff before requesting any publication approval.
 
 ### Export settings — 2026-11-19
 
@@ -363,6 +399,32 @@ Start a new dashboard chunk in this report before implementation. The backend/qu
 - Verify the older migration dependency targets on the desktop before installing. Laptop-installed wheels do not establish desktop compatibility.
 
 ## Work log
+
+- 2026-11-20 — Finished GitHub update preflight. All 34 pending project files passed the private path check, added content passed the credential signature check, and the working-tree diff passed the whitespace check. The authorized update includes source, tests, and release preparation documentation.
+
+- 2026-11-20 — Started the user-authorized GitHub update to `origin/main`. Review the complete pending project diff, verify private artifacts are excluded, then commit and verify the remote branch.
+
+- 2026-11-20 — Finished implementation and lightweight verification for public beta dashboard polish. Visual verification and live rollout remain pending. No backend, rendering, or persisted project data changes.
+
+- 2026-11-20 — Started the public beta dashboard polish requested in the attached brief.
+
+- 2026-11-20 — Finished the approved localhost rollout. The frontend build passed and the restarted dashboard served the expected four framing choices. Backend health passed.
+
+- 2026-11-20 — Started checking the localhost rollout of the simplified framing dropdown after the user reported seeing the old options.
+
+- 2026-11-20 — Finished the framing dropdown simplification. Verified all four choices, compatibility with the three legacy states, and existing export access using lightweight checks. No rendering, persistence, or API code changed.
+
+- 2026-11-20 — Started the framing dropdown simplification. Both workspace and revision forms use `FramingEditor`; saved job settings already flow through unchanged.
+
+- 2026-11-20: Finished manual-testing startup. The dashboard returned HTTP 200 at `http://127.0.0.1:3000`, and the backend at `http://127.0.0.1:8000/health` reported healthy with its worker enabled. Both are running for the user on loopback.
+- 2026-11-20: Started the user-requested manual-testing server launch. Verify the standard localhost backend and production dashboard with HTTP health checks.
+- 2026-11-20: Finished the approved localhost browser acceptance and stopped the isolated services. Recorded passing end-to-end checks, the corrected automation timing failure, and revised 85/100 readiness in the report and checklist.
+- 2026-11-20: Started the approved isolated localhost browser test. The current production bundle and backend listen on loopback. Use the disposable clip to check the real upload, ranking, playback, framing change, render, download, and history restoration.
+- 2026-11-20: Started release-gate preparation. Requested approval for the isolated localhost workflow and official upstream research. Starting with local fixture, installed dependency, and Git review.
+- 2026-11-20: Finished release-gate preparation. Verified the disposable fixture, clean venv bootstrap, installed license inventory, and local Git hygiene. Added the checklist and README launcher fallback. Awaiting browser and upstream access approvals. All preparation processes finished and the working tree remains local.
+- 2026-11-20: Started smart spatial cropping. Repository and architecture inspection completed. Manual crop and Hybrid rendering started.
+- 2026-11-20: Started the beta audit and routine stabilization. Scope covered the planner, renderer, editor, API worker, regression tests, and public setup documentation. Verification used synthetic clips, focused tests, dependency checks, and the production build.
+- 2026-11-20: Finished spatial implementation checks and essential fixes. Verified API still/export parity, preserved revisions, Full Frame/Hybrid/Focus foreground comparisons, and 24 probed matrix encodes. Finished beta documentation and privacy review. Browser, fresh install, upstream advisory and license checks, and project license decision remain at the approval boundary. No test or server process from this audit remains running.
 
 Earlier milestones below are retrospective summaries reconstructed from the session, changelog, and observed test results. Their original start times were not recorded.
 

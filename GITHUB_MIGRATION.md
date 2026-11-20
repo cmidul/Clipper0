@@ -1,15 +1,15 @@
 # GitHub Transfer — Laptop to Desktop
 
 ## Policy
-Each command or edit requires one separate clear user confirmation under `AGENTS.md`. Never auto-push, auto-pull or make a public repository without approval.
+Apply the Smart Autonomy Policy in [AGENTS.md](AGENTS.md). Local inspection and documentation are routine. Ask before any push, publication, visibility change, or external transfer.
 
 ## Preparation on laptop
-1. Review Git diff and `.gitignore` for sensitive/large files; request approval for inspection commands.
+1. Review Git diff and `.gitignore` for sensitive and large files.
 2. Ensure recordings, subtitles containing identifiable speech, generated clips, caches, SQLite databases, local `.env*`, virtual environments, model weights and tokens are excluded.
-3. Write `README.md`, pinned Python dependencies/lockfile where possible, `package-lock.json`, `.env.example` and test instructions. Each file action separately approved.
+3. Verify the README setup, pinned Python requirements, npm lockfile, environment example, and test instructions.
 4. Decide **private GitHub repository** by default; confirm repository ownership and destination with user.
 5. Confirm that no sensitive file was previously committed; `.gitignore` does not erase history.
-6. Request explicit approval for each init, add, commit, remote, push action.
+6. Confirm the owner-approved destination and request permission before publishing or pushing.
 
 ## Example commands (NOT automatically executable)
 ```powershell

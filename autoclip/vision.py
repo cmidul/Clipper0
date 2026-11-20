@@ -4,15 +4,16 @@ import hashlib
 import json
 import math
 from pathlib import Path
+from statistics import median
 import tempfile
 
-from .engine import ClipError, Media, Settings, check_cancelled, run_tool
-from .reframing import (CropKeyframe, FocusPoint, FramingPlan, FramingSettings, Region,
-                        build_initial_plan, crop_for_focus, region_coverage)
+from .engine import ClipError, JobCancelled, Media, Settings, check_cancelled, run_tool
+from .reframing import (SPATIAL_MODES, CropKeyframe, FocusPoint, FramingPlan, FramingSettings, Region,
+                        build_initial_plan, crop_for_focus, region_coverage, uses_visual_analysis)
 
-ANALYSIS_VERSION = 1
+ANALYSIS_VERSION = 2
 SAMPLE_FPS = 3
-MAX_WIDTH = 640
+MAX_EDGE = 640
 
 
 def scene_change(previous, current) -> float:
@@ -63,7 +64,8 @@ def motion_focus(previous, current, roi: Region | None = None):
 
 
 def smooth_track(samples: list[dict], width: int, height: int, intensity: float,
-                 aspect_ratio: str = "9:16") -> tuple[CropKeyframe, ...]:
+                 aspect_ratio: str = "9:16", *, mode: str = "smart_crop", zoom: float = 1,
+                 anchor: FocusPoint = FocusPoint(0.5, 0.5)) -> tuple[CropKeyframe, ...]:
     """Bound pan speed with a dead zone, hold weak targets, reset at scene cuts."""
     output = []
     position = None
@@ -73,8 +75,8 @@ def smooth_track(samples: list[dict], width: int, height: int, intensity: float,
         time, scene = sample["time"], sample["scene"]
         proposed = FocusPoint(sample["x"], sample["y"])
         if scene != previous_scene or position is None:
-            position = proposed
-            target = proposed
+            position = proposed if sample["confidence"] >= 0.5 else anchor
+            target = position
         elif sample["confidence"] >= 0.5 and (time - last_target_time >= 1 or
                 math.hypot(proposed.x - target.x, proposed.y - target.y) < 0.15):
             target = proposed
@@ -87,7 +89,8 @@ def smooth_track(samples: list[dict], width: int, height: int, intensity: float,
                 distance = max(1e-9, math.hypot(dx, dy))
                 movement = min(alpha, (0.035 + 0.12 * intensity) * dt / distance)
                 position = FocusPoint(position.x + dx * movement, position.y + dy * movement)
-        output.append(CropKeyframe(time, crop_for_focus(width, height, position, aspect_ratio=aspect_ratio),
+        output.append(CropKeyframe(time, crop_for_focus(width, height, position, aspect_ratio=aspect_ratio,
+                                                        mode=mode, zoom=zoom),
                                    sample["confidence"], scene))
         previous_time, previous_scene = time, scene
     return tuple(output)
@@ -114,10 +117,11 @@ def analyze_frames(frames, settings: FramingSettings) -> dict:
     cv2.setNumThreads(1)
     detector = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
     if detector.empty():
-        raise ClipError("The local face cascade is unavailable; use manual focus or Full gameplay.")
+        detector = None
     previous = None
     previous_face = None
     samples, webcam_faces = [], []
+    last_webcam_frame = None
     scene, count = 0, 0
     for time, image in frames:
         check_cancelled()
@@ -126,7 +130,7 @@ def analyze_frames(frames, settings: FramingSettings) -> dict:
         if transition:
             scene += 1
             previous_face = None
-        face = _face_observation(gray, detector, previous_face)
+        face = _face_observation(gray, detector, previous_face) if detector is not None else None
         point, confidence, energy = None, 0.0, 0.0
         kind, region = "none", None
         if face is not None:
@@ -135,11 +139,18 @@ def analyze_frames(frames, settings: FramingSettings) -> dict:
             # A face is only a webcam proposal when persistently small, stable
             # and near a corner; split selection additionally requires a border.
             if region.width * region.height < 0.06 and (point.x < 0.25 or point.x > 0.75):
-                webcam_faces.append((region, gray.copy()))
+                webcam_faces.append(region)
+                last_webcam_frame = gray
         if previous is not None and not transition:
             motion, activity_confidence, energy = motion_focus(previous, gray, settings.focus_region)
             if point is None and motion is not None:
-                point, confidence, kind = motion, activity_confidence, "activity"
+                if abs(motion.x - 0.5) <= 0.16 and abs(motion.y - 0.5) <= 0.18:
+                    # Mild central-action prior. This does not recognize games or crosshairs.
+                    point = FocusPoint(0.8 * motion.x + 0.1, 0.8 * motion.y + 0.1)
+                    kind = "central_activity"
+                else:
+                    point, kind = motion, "activity"
+                confidence = activity_confidence
         if point is None:
             point = FocusPoint(0.5, 0.5)
         sample = {"time": round(float(time), 4), "scene": scene, "x": point.x, "y": point.y,
@@ -153,14 +164,14 @@ def analyze_frames(frames, settings: FramingSettings) -> dict:
         count += 1
     webcam, webcam_confidence = None, 0.0
     if count and len(webcam_faces) / count >= 0.8:
-        centers = np.array([[region.center.x, region.center.y] for region, _ in webcam_faces])
+        centers = np.array([[region.center.x, region.center.y] for region in webcam_faces])
         if float(centers.std(axis=0).max()) < 0.025:
-            face = webcam_faces[-1][0]
+            face = webcam_faces[-1]
             # Propose a padded rectangle; a strong rectangular boundary is
             # required before calling it an automatically usable webcam area.
             left, top = max(0, face.x - face.width * 0.6), max(0, face.y - face.height * 0.5)
             webcam = Region(left, top, min(1 - left, face.width * 2.2), min(1 - top, face.height * 2.5))
-            gray = webcam_faces[-1][1]
+            gray = last_webcam_frame
             h, w = gray.shape
             x, y, rw, rh = int(left * w), int(top * h), int(webcam.width * w), int(webcam.height * h)
             edges = cv2.Canny(gray, 70, 150)[y:y+rh, x:x+rw]
@@ -169,7 +180,7 @@ def analyze_frames(frames, settings: FramingSettings) -> dict:
     return {"version": ANALYSIS_VERSION, "samples": samples[:64], "sample_count": count,
             "scene_count": scene + 1 if count else 0,
             "webcam_region": asdict(webcam) if webcam else None, "webcam_confidence": webcam_confidence,
-            "signals": ["scene histogram", "local residual optical flow", "contrast", "local Haar faces"],
+            "signals": ["scene histogram", "local residual optical flow", "contrast", "central-action prior", "local Haar faces"],
             "warning": "Visual heuristics do not establish semantic importance."}
 
 
@@ -182,7 +193,7 @@ def analyze_candidate(media: Media, start: float, end: float, settings: Settings
         raise ClipError("Visual dependencies are missing; install requirements-vision.txt or use Full gameplay.") from exc
     identity = {"version": ANALYSIS_VERSION, "sha256": source_sha256 or digest_file(media.path),
                 "start": start, "end": end, "width": media.width, "height": media.height,
-                "fps": SAMPLE_FPS, "max_width": MAX_WIDTH, "opencv": cv2.__version__}
+                "fps": SAMPLE_FPS, "max_edge": MAX_EDGE, "opencv": cv2.__version__}
     key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     cache = settings.data_dir / "reframing" / f"{key}.json"
     if cache.is_file():
@@ -197,7 +208,9 @@ def analyze_candidate(media: Media, start: float, end: float, settings: Settings
         run_tool([settings.ffmpeg, "-nostdin", "-v", "error", "-n", "-threads", str(settings.threads),
                   "-protocol_whitelist", "file,pipe", "-ss", f"{start:.6f}", "-i", str(media.path),
                   "-t", f"{end-start:.6f}", "-map", "0:V:0", "-an", "-sn", "-dn",
-                  "-filter_threads", "1", "-vf", f"fps={SAMPLE_FPS},scale='min({MAX_WIDTH},iw)':-2",
+                  "-filter_threads", "1", "-vf",
+                  f"fps={SAMPLE_FPS},scale='min({MAX_EDGE},iw)':'min({MAX_EDGE},ih)':"
+                  "force_original_aspect_ratio=decrease:force_divisible_by=2",
                   "-c:v", "ffv1", "-threads", "1", str(decoded)])
         capture = cv2.VideoCapture(str(decoded))
         def frames():
@@ -243,34 +256,78 @@ def _valid_analysis(analysis, duration):
 
 def plan_from_analysis(media: Media, start: float, end: float, settings: FramingSettings,
                        analysis: dict, *, aspect_ratio="9:16") -> tuple[FramingPlan, FramingSettings]:
-    """Conservative, explainable decisions; motion-only evidence never selects Auto crop."""
-    if settings.focus_point is not None or settings.focus_region is not None or settings.webcam_region is not None or settings.mode == "full_gameplay":
-        return build_initial_plan(media.width, media.height, start, end, settings, aspect_ratio=aspect_ratio), settings
-    samples = analysis["samples"]
+    """Use narrow framing only when evidence is persistent and the target fits."""
+    initial = build_initial_plan(media.width, media.height, start, end, settings, aspect_ratio=aspect_ratio)
+    if not uses_visual_analysis(settings):
+        return initial, settings
     if not _valid_analysis(analysis, end-start):
         raise ClipError("Cached visual evidence is invalid.")
+    samples = analysis["samples"]
     webcam = analysis.get("webcam_region")
-    if (settings.mode in {"auto", "streamer_gameplay"}
+    if (settings.mode == "streamer_gameplay"
             and webcam is not None and analysis.get("webcam_confidence", 0) >= 0.85):
         effective = replace(settings, webcam_region=Region(**webcam))
         return FramingPlan(media.width, media.height, start, end, settings.mode, "streamer_gameplay", 0.85), effective
-    def preserve(reason):
-        return FramingPlan(media.width, media.height, start, end, settings.mode, "full_gameplay", 0,
-                           fallback_reason=reason), settings
+    anchor = settings.focus_region.center if settings.focus_region else FocusPoint(0.5, 0.5)
+
+    def fallback(reason):
+        plan = initial
+        if settings.mode == "focus_crop":
+            plan = build_initial_plan(media.width, media.height, start, end,
+                                      replace(settings, mode="hybrid_focus"), aspect_ratio=aspect_ratio)
+        return replace(plan, requested_mode=settings.mode, fallback_reason=reason), settings
+
     if settings.mode == "streamer_gameplay":
-        return preserve("No confident webcam boundary found. Select its region manually or use Full gameplay.")
+        return fallback("No confident webcam boundary found. Select its region manually or use Full Frame.")
     if analysis.get("scene_count", 0) > 8:
-        return preserve("Frequent scene changes make tracking unreliable; preserving all content.")
-    reliable = [sample for sample in samples if sample["confidence"] >= (0.8 if settings.mode == "auto" else 0.5)]
-    if len(reliable) < len(samples) * 0.75:
-        return preserve("Target confidence or persistence is insufficient; preserving all content.")
-    if settings.mode == "auto" and any(sample["kind"] != "face" for sample in reliable):
-        return preserve("Activity alone does not establish an important subject; preserving all content.")
-    frames = smooth_track(samples, media.width, media.height, settings.tracking_intensity, aspect_ratio)
-    # Do not sacrifice the detected subject merely to keep a moving crop.
-    for frame, sample in zip(frames, samples):
-        if sample.get("region") and region_coverage(frame.crop, Region(**sample["region"]), media.width, media.height) < 0.98:
-            return preserve("The detected subject would leave the smoothed crop; preserving all content.")
+        return fallback("Frequent scene changes make tracking unreliable.")
+    roi = settings.focus_region
+    if roi:
+        samples = [
+            sample if roi.x <= sample["x"] <= roi.x + roi.width and roi.y <= sample["y"] <= roi.y + roi.height
+            else {**sample, "confidence": 0, "kind": "none", "region": None}
+            for sample in samples
+        ]
+    strong_faces = [sample for sample in samples if sample["kind"] == "face" and sample["confidence"] >= 0.8]
+    supported = [sample for sample in samples if sample["confidence"] >= 0.5
+                 and (roi or sample["kind"] in {"central_activity", "face"})]
+    if settings.mode == "auto":
+        modes = (("focus_crop", strong_faces), ("hybrid_focus", supported))
+    elif settings.mode == "focus_crop":
+        modes = (("focus_crop", strong_faces), ("hybrid_focus", supported))
+    elif settings.mode == "hybrid_focus":
+        modes = (("hybrid_focus", supported),)
+    else:
+        modes = (("smart_crop", [sample for sample in samples if sample["confidence"] >= 0.5]),)
+    for mode, reliable in modes:
+        if len(reliable) < len(samples) * 0.75:
+            continue
+        zoom = settings.foreground_zoom if mode in SPATIAL_MODES else 1
+        if (mode == "focus_crop" and zoom == 1 and roi is None
+                and all(sample.get("region") and sample["region"]["height"] <= 0.2
+                        and 0.3 <= sample["x"] <= 0.7 and 0.3 <= sample["y"] <= 0.7 for sample in reliable)):
+            # Use a single modest magnification for a consistently small subject.
+            zoom = 1.1
+        trusted = {sample["time"] for sample in reliable}
+        track = [sample if sample["time"] in trusted else {**sample, "confidence": 0} for sample in samples]
+        fixed = FocusPoint(median(sample["x"] for sample in reliable), median(sample["y"] for sample in reliable))
+        if settings.smooth_tracking and settings.tracking_intensity > 0:
+            frames = smooth_track(track, media.width, media.height, settings.tracking_intensity,
+                                  aspect_ratio, mode=mode, zoom=zoom, anchor=fixed)
+        else:
+            crop = crop_for_focus(media.width, media.height, fixed, aspect_ratio=aspect_ratio, mode=mode, zoom=zoom)
+            frames = (CropKeyframe(0, crop, 1),) * len(samples)
+        if all(
+            (roi is None or region_coverage(frame.crop, roi, media.width, media.height) >= 0.98)
+            and (sample["time"] not in trusted or not sample.get("region") or
+                 region_coverage(frame.crop, Region(**sample["region"]), media.width, media.height) >= 0.98)
+            for frame, sample in zip(frames, samples)
+        ):
+            if not settings.smooth_tracking or settings.tracking_intensity == 0:
+                frames = frames[:1]
+            break
+    else:
+        return fallback("Visual evidence was weak, inconsistent, or could not fit inside the crop.")
     confidence = sum(sample["confidence"] for sample in reliable) / len(reliable)
     emphasis = []
     if settings.emphasis_zoom and confidence >= 0.85:
@@ -279,5 +336,26 @@ def plan_from_analysis(media: Media, start: float, end: float, settings: Framing
                 emphasis.append(sample["time"])
                 if len(emphasis) == 3:
                     break
-    return FramingPlan(media.width, media.height, start, end, settings.mode, "smart_crop", confidence,
+    return FramingPlan(media.width, media.height, start, end, settings.mode, mode, confidence,
                        keyframes=frames, emphasis_times=tuple(emphasis)), settings
+
+
+def plan_candidate_framing(media: Media, start: float, end: float, framing: FramingSettings,
+                           settings: Settings, *, aspect_ratio: str, source_sha256: str | None = None):
+    """Resolve one highlight for playback or export using the same cached evidence."""
+    if uses_visual_analysis(framing):
+        try:
+            analysis = analyze_candidate(media, start, end, settings, source_sha256=source_sha256)
+            plan, effective = plan_from_analysis(media, start, end, framing, analysis, aspect_ratio=aspect_ratio)
+            return plan, effective, analysis
+        except JobCancelled:
+            raise
+        except (ClipError, OSError) as exc:
+            fallback = replace(framing, mode="hybrid_focus") if framing.mode == "focus_crop" else framing
+            plan = build_initial_plan(media.width, media.height, start, end, fallback, aspect_ratio=aspect_ratio)
+            reason = ("Visual analysis unavailable; preserving the full frame."
+                      if plan.selected_mode == "full_gameplay" else "Visual analysis unavailable; using static framing.")
+            plan = replace(plan, requested_mode=framing.mode, fallback_reason=reason)
+            return plan, framing, {"error": str(exc)[:500], "cache_hit": False}
+    plan = build_initial_plan(media.width, media.height, start, end, framing, aspect_ratio=aspect_ratio)
+    return plan, framing, None
