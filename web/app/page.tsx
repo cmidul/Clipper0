@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type InvalidEvent } from "react";
 import FramingEditor from "../components/FramingEditor";
+import { LocalRecordingMonitor, SourceFrameMonitor, VideoMonitor } from "../components/MediaMonitor";
 import { framingError } from "../lib/framing";
 import { apiPath, apiRequest, ASPECT_RATIO_OPTIONS, COMPRESSION_OPTIONS, DEFAULT_FRAMING, FRAMING_LABELS, formatSize, formatTime, intervalError,
   isActive, outputDimensions, processorErrorMessage, uploadFile, VIDEO_QUALITY_OPTIONS, type AspectRatio, type AssetDeletionResult,
@@ -78,8 +79,10 @@ function StateBadge({ job }: { job: Job }) {
   </span>;
 }
 
-function CandidateCard({ candidate, duration, media, initialLayout, initialExportSettings, initialFraming, onReview, onRender }: {
+function ClipInspector({ candidate, index, hidden, duration, media, initialLayout, initialExportSettings, initialFraming, onReview, onRender, onInvalid }: {
   candidate: Candidate;
+  index: number;
+  hidden: boolean;
   duration: number;
   initialLayout: Layout;
   initialExportSettings: ExportSettings;
@@ -87,6 +90,7 @@ function CandidateCard({ candidate, duration, media, initialLayout, initialExpor
   initialFraming: FramingOptions | null;
   onReview: (id: string, review: ReviewState) => Promise<void>;
   onRender: (candidate: Candidate, start: number, end: number, layout: Layout, exportSettings: ExportSettings, framing: FramingOptions|null) => Promise<void>;
+  onInvalid: (event: InvalidEvent<HTMLFormElement>) => void;
 }) {
   const [start, setStart] = useState(String(candidate.start));
   const [end, setEnd] = useState(String(candidate.end));
@@ -95,7 +99,6 @@ function CandidateCard({ candidate, duration, media, initialLayout, initialExpor
   const [framing, setFraming] = useState<FramingOptions|null>(initialFraming);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const savedSize = outputDimensions(initialExportSettings.resolution, initialExportSettings.aspectRatio);
   const labels: Record<string, string> = { audio_peak: "Audio peak", audio_onset: "Audio change",
     speech_activity: "Speech activity", transcript_cues: "Transcript cues" };
 
@@ -109,6 +112,7 @@ function CandidateCard({ candidate, duration, media, initialLayout, initialExpor
 
   async function render(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy) return;
     const problem = intervalError(Number(start), Number(end), duration) || framingError(framing);
     if (problem) { setError(problem); return; }
     setBusy(true);
@@ -118,46 +122,45 @@ function CandidateCard({ candidate, duration, media, initialLayout, initialExpor
     finally { setBusy(false); }
   }
 
-  return <article className={`candidate-card review-${candidate.review_state}`}>
-    <div className="clip-player"><video controls playsInline preload="metadata" style={{ aspectRatio: `${savedSize.width} / ${savedSize.height}` }} aria-label={`Candidate from ${formatTime(candidate.start)} to ${formatTime(candidate.end)}`} src={apiPath(candidate.preview_url)} /></div>
-    <div className="clip-content">
-      <div className="clip-heading"><h3>{formatTime(candidate.start)} <span>—</span> {formatTime(candidate.end)}</h3>
+  return <section className="clip-inspector" hidden={hidden} aria-label={`Clip ${index} settings`}>
+      <div className="clip-heading"><h3>Clip {String(index).padStart(2, "0")}</h3>
         <span className={`review-label ${candidate.review_state}`}>{candidate.review_state}</span></div>
-      <div className="clip-meta"><span>{(candidate.end - candidate.start).toFixed(1)} sec</span>
-        <span>Heuristic score {candidate.score.toFixed(2)}</span></div>
+      <div className="clip-meta"><span>{formatTime(candidate.start)} – {formatTime(candidate.end)}</span>
+        <span>{(candidate.end - candidate.start).toFixed(1)} sec</span></div>
       {candidate.framing&&<p className="framing-result">{FRAMING_LABELS[candidate.framing.selected_mode]}
         {candidate.framing.fallback_reason?` · ${candidate.framing.fallback_reason}`:` · Estimated framing confidence ${Math.round(candidate.framing.confidence*100)}%`}</p>}
       <div className="review-actions">
-        <button type="button" aria-pressed={candidate.review_state === "approved"} className="approve-button" disabled={busy}
+        <button type="button" aria-pressed={candidate.review_state === "approved"} className="secondary-button approve-button" disabled={busy}
           onClick={() => review(candidate.review_state === "approved" ? "proposed" : "approved")}>Approve</button>
-        <button type="button" aria-pressed={candidate.review_state === "rejected"} className="reject-button" disabled={busy}
+        <button type="button" aria-pressed={candidate.review_state === "rejected"} className="secondary-button reject-button" disabled={busy}
           onClick={() => review(candidate.review_state === "rejected" ? "proposed" : "rejected")}>Reject</button>
-        <a className="download-button" href={apiPath(candidate.download_url)}>Download</a>
+        {candidate.has_subtitles && <a className="secondary-button" href={apiPath(`/clips/${candidate.clip_id}/subtitles`)}>Captions (.srt)</a>}
       </div>
-      <details className="clip-details"><summary>Adjust clip</summary>
-        <form onSubmit={render} className="revision-form">
+      <form id={`revision-${candidate.id}`} onSubmit={render} onInvalidCapture={onInvalid} className="revision-form">
+        <details className="inspector-section" open><summary>Clip interval</summary><div className="inspector-fields">
           <div className="form-grid two"><label>Start (seconds)<input aria-label="Revision start" type="number" step="any" min="0" max={duration} value={start} onChange={(event) => setStart(event.target.value)} required disabled={busy} /></label>
             <label>End (seconds)<input aria-label="Revision end" type="number" step="any" min="0" max={duration} value={end} onChange={(event) => setEnd(event.target.value)} required disabled={busy} /></label></div>
           {!framing&&<label>Layout<select aria-label="Revision layout" value={layout} onChange={(event) => setLayout(event.target.value as Layout)} disabled={busy}>
             <option value="pad">Fit full frame</option><option value="crop">Center crop</option></select></label>
           }
-          <ExportControls settings={exportSettings} onChange={setExportSettings} media={media} disabled={busy} revision />
+        </div></details>
+        <details className="inspector-section" open><summary>Framing</summary><div className="inspector-fields">
           <FramingEditor value={framing} onChange={setFraming} mediaId={media?.id} width={media?.width} height={media?.height}
             duration={duration} initialTime={candidate.start} ratio={exportSettings.aspectRatio} resolution={exportSettings.resolution}
-            disabled={busy} plan={candidate.framing} interval={{start:Number(start),end:Number(end)}}
+            disabled={busy} plan={candidate.framing} interval={{start:Number(start),end:Number(end)}} showHeading={false}
             original={{settings:initialFraming,ratio:initialExportSettings.aspectRatio}}/>
-          <button type="submit" className="secondary-button" disabled={busy}>{busy ? "Saving…" : "Render revision"}</button>
-        </form>
-      </details>
+        </div></details>
+        <details className="inspector-section"><summary>Output</summary><div className="inspector-fields">
+          <ExportControls settings={exportSettings} onChange={setExportSettings} media={media} disabled={busy} revision />
+        </div></details>
+      </form>
       <details className="clip-details evidence"><summary>Why this candidate</summary>
         {candidate.evidence.contributions ? <dl>{Object.entries(candidate.evidence.contributions).map(([name, value]) =>
           <div key={name}><dt>{labels[name] || name}</dt><dd>{value.toFixed(3)}</dd></div>)}</dl> : <p>This interval was selected manually.</p>}
         {!!candidate.evidence.cue_matches?.length && <p>Matched cues · {candidate.evidence.cue_matches.join(", ")}</p>}
       </details>
-      {candidate.has_subtitles && <a className="subtitle-link" href={apiPath(`/clips/${candidate.clip_id}/subtitles`)}>Download captions (.srt)</a>}
       {error && <p className="inline-error" role="alert">{error}</p>}
-    </div>
-  </article>;
+  </section>;
 }
 
 export default function Workspace() {
@@ -198,10 +201,18 @@ export default function Workspace() {
   const [manualEnd, setManualEnd] = useState("30");
   const [candidateRefresh, setCandidateRefresh] = useState(0);
   const [workspaceKey, setWorkspaceKey] = useState(0);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [showSource, setShowSource] = useState(false);
+  const [inspectorMode, setInspectorMode] = useState<"recording" | "clip" | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const archiveDialog = useRef<HTMLDialogElement>(null);
   const deleteDialog = useRef<HTMLDialogElement>(null);
   const newRecordingButton = useRef<HTMLButtonElement>(null);
+  const libraryToggle = useRef<HTMLButtonElement>(null);
+  const inspectorToggle = useRef<HTMLButtonElement>(null);
+  const inspectorHeading = useRef<HTMLHeadingElement>(null);
   const operation = useRef<AbortController | null>(null);
   const initialized = useRef(false);
   const workspaceVersion = useRef(0);
@@ -217,6 +228,12 @@ export default function Workspace() {
   const shownCandidates = selectedAssetsAvailable
     ? candidates.filter((candidate) => filter === "all" || candidate.review_state === "approved")
     : [];
+  const selectedClip = shownCandidates.find((candidate) => candidate.id === selectedClipId) ?? shownCandidates[0];
+  const selectedClipIndex = selectedClip ? candidates.indexOf(selectedClip) + 1 : 0;
+  const clipInspector = Boolean(selectedClip && (inspectorMode ?? "clip") === "clip");
+  const recordingName = pendingFile?.name ?? selectedMedia?.filename;
+  const savedSettings = exportSettingsFromJob(selectedJob);
+  const savedSize = outputDimensions(savedSettings.resolution, savedSettings.aspectRatio);
   const activeJobs = jobs.filter(isActive).length;
   const deleteBlocked = Boolean(deleteTarget && jobs.some((job) => job.media_id === deleteTarget.id && isActive(job)));
 
@@ -312,6 +329,9 @@ export default function Workspace() {
     setCandidatesLoading(false);
     setCandidateRefresh((value) => value + 1);
     setFilter("all");
+    setSelectedClipId(null);
+    setShowSource(false);
+    setInspectorMode(null);
     setError(null);
     setNotice(null);
   }
@@ -339,6 +359,7 @@ export default function Workspace() {
     setManual(false);
     setManualStart("0");
     setManualEnd("30");
+    setLibraryOpen(false);
   }
 
   async function archiveProject() {
@@ -354,7 +375,10 @@ export default function Workspace() {
       setJobs((records) => records.filter((job) => job.media_id !== updated.id));
       if (selectedMediaId === updated.id) resetWorkspace();
       archiveDialog.current?.close();
-      newRecordingButton.current?.focus();
+      requestAnimationFrame(() => {
+        if (libraryToggle.current?.offsetWidth && !newRecordingButton.current?.offsetWidth) libraryToggle.current.focus();
+        else newRecordingButton.current?.focus();
+      });
       setNotice(`Removed ${updated.filename} from history. You can restore it from Archived Projects.`);
       refreshWorkspace.current?.();
     } catch (failure) {
@@ -459,6 +483,9 @@ export default function Workspace() {
     setSelectedJobId(job.id);
     setCandidates([]);
     setFilter("all");
+    setSelectedClipId(null);
+    setShowSource(false);
+    setInspectorMode(null);
   }
 
   async function generate(event: FormEvent<HTMLFormElement>) {
@@ -561,10 +588,69 @@ export default function Workspace() {
     }
   }
 
-  return <div className="app-shell">
-    <aside className="sidebar">
-      <a className="brand" href="/" aria-label="Clipper0 home"><span className="brand-mark" aria-hidden="true">▥</span><span>Clipper0</span></a>
-      <button ref={newRecordingButton} type="button" className="new-recording" onClick={resetWorkspace}><span aria-hidden="true">＋</span> New recording</button>
+  function selectClip(candidate: Candidate, adjust = false) {
+    setSelectedClipId(candidate.id);
+    setShowSource(false);
+    setInspectorMode("clip");
+    if (adjust) {
+      setLibraryOpen(false);
+      setInspectorOpen(true);
+      requestAnimationFrame(() => inspectorHeading.current?.focus());
+    }
+  }
+
+  function revealInvalidField(event: InvalidEvent<HTMLFormElement>) {
+    const field = event.target;
+    if (!(field instanceof HTMLElement) || field.getClientRects().length > 0) return;
+    for (let parent = field.parentElement; parent && parent !== event.currentTarget; parent = parent.parentElement) {
+      if (parent instanceof HTMLDetailsElement) parent.open = true;
+    }
+    setLibraryOpen(false);
+    setInspectorOpen(true);
+    requestAnimationFrame(() => field.focus());
+  }
+
+  const connectionLabel = connection.state === "online" ? "Processor connected" : connection.state === "checking" ? "Connecting…" : "Processor unavailable";
+  const clipTitle = `Clip ${String(selectedClipIndex).padStart(2, "0")}`;
+  return <div className="app-shell" onKeyDown={(event) => {
+    if (event.key !== "Escape" || event.defaultPrevented || archiveDialog.current?.open || deleteDialog.current?.open) return;
+    if (libraryOpen && libraryToggle.current?.offsetWidth) {
+      setLibraryOpen(false);
+      libraryToggle.current.focus();
+    } else if (inspectorOpen && inspectorToggle.current?.offsetWidth) {
+      setInspectorOpen(false);
+      inspectorToggle.current.focus();
+    }
+  }}>
+    <header className="studio-toolbar">
+      <div className="toolbar-brand">
+        <a className="brand" href="/" aria-label="Clipper0 home"><span className="brand-mark" aria-hidden="true" /><span>Clipper0</span></a>
+        <button ref={libraryToggle} type="button" className="secondary-button library-toggle" aria-expanded={libraryOpen} aria-controls="media-library"
+          onClick={() => { setLibraryOpen(!libraryOpen); setInspectorOpen(false); }}>Library</button>
+      </div>
+      <h1 title={recordingName}>{recordingName || "New recording"}</h1>
+      <div className="toolbar-actions">
+        <span className="connection-label" role="status"><span className={`connection-dot ${connection.state}`} aria-hidden="true" />{connectionLabel}</span>
+        <button type="button" className="secondary-button refresh-button" disabled={refreshing} onClick={() => { refreshWorkspace.current?.(); setCandidateRefresh((value) => value + 1); }}
+          aria-label="Refresh workspace" title="Refresh workspace"><span aria-hidden="true">↻</span></button>
+        <button ref={inspectorToggle} type="button" className="secondary-button inspector-toggle" aria-expanded={inspectorOpen} aria-controls="studio-inspector"
+          onClick={() => {
+            setLibraryOpen(false);
+            setInspectorOpen(!inspectorOpen);
+            if (!inspectorOpen) requestAnimationFrame(() => inspectorHeading.current?.focus());
+          }}>Inspector</button>
+        {clipInspector && selectedClip
+          ? <button className="generate-button" type="submit" form={`revision-${selectedClip.id}`} disabled={busy || connection.state !== "online"}>{busy ? "Creating job…" : "Render revision"}</button>
+          : <button className="generate-button" type="submit" form="generation-settings" disabled={busy || !selectedAssetsAvailable || !recordingName || connection.state !== "online"}>
+            {busy ? (uploading ? "Importing…" : "Creating job…") : manual ? "Render selected interval" : "Generate candidates"}</button>}
+      </div>
+    </header>
+    <aside className="sidebar" id="media-library" data-open={libraryOpen} aria-labelledby="library-heading">
+      <div className="panel-heading library-heading"><h2 id="library-heading">Media Library</h2></div>
+      <button ref={newRecordingButton} type="button" className="new-recording secondary-button" onClick={() => {
+        resetWorkspace();
+        if (libraryToggle.current?.offsetWidth) requestAnimationFrame(() => libraryToggle.current?.focus());
+      }}><span aria-hidden="true">＋</span> New recording</button>
       <div className="sidebar-section-label">Recordings <span>{media.length}</span></div>
       <nav className="recording-list" aria-label="Imported recordings">
         {media.length === 0 && <p className="sidebar-empty">No recordings imported</p>}
@@ -607,7 +693,6 @@ export default function Workspace() {
             </button>
           </li>)}</ul>}
       </details>
-      <div className="sidebar-footer"><span className={`connection-dot ${connection.state}`} /><span>{connection.state === "online" ? "Processor connected" : connection.state === "checking" ? "Connecting…" : "Processor needs attention"}</span></div>
     </aside>
     <dialog ref={archiveDialog} className="project-dialog" aria-labelledby="archive-title"
       onClose={() => { setArchiveTarget(null); setArchiveError(null); }}
@@ -645,39 +730,118 @@ export default function Workspace() {
     </dialog>
 
     <main className="main-workspace">
-      <header className="workspace-header"><h1>Workspace</h1>
-        <div className="header-actions">{activeJobs > 0 && <span className="active-count">{activeJobs} active {activeJobs === 1 ? "job" : "jobs"}</span>}
-          <button type="button" className="refresh-button" disabled={refreshing} onClick={() => { refreshWorkspace.current?.(); setCandidateRefresh((value) => value + 1); }} aria-label="Refresh workspace"><span aria-hidden="true">↻</span> {refreshing ? "Syncing…" : "Refresh"}</button></div></header>
 
       {(connection.state === "offline" || connection.state === "degraded") && <section className="connection-banner" role="status"><div><strong>Processor unavailable</strong><p>{connection.message}</p>
         <details><summary>Start the local processor</summary><code>.\.venv\Scripts\python.exe -m autoclip serve</code></details></div><button type="button" className="secondary-button" onClick={() => refreshWorkspace.current?.()}>Retry connection</button></section>}
       {error && <div className="message error-message" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)} aria-label="Dismiss error">×</button></div>}
       {notice && <div className="message notice-message" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice(null)} aria-label="Dismiss notification">×</button></div>}
 
-      <div className="workspace-grid">
-        <section className="setup-panel" aria-labelledby="recording-heading">
-          <div className="panel-heading"><h2 id="recording-heading">Recording</h2></div>
-          {!selectedAssetsAvailable && <p role="status" className="inline-error">
-            {assetStatusLabels[selectedAssetStatus] || "Deleting files…"} · Import the original recording to render new clips.
-          </p>}
-          <input ref={fileInput} type="file" accept=".mp4,.mkv,video/mp4,video/x-matroska" className="file-input" aria-label="Choose recording file" disabled={busy}
-            onChange={(event) => { chooseFile(event.target.files?.[0]); event.target.value = ""; }} />
-          <div className={`upload-zone ${dragging ? "dragging" : ""}`}
-            onDragOver={(event) => { event.preventDefault(); if (!busy) setDragging(true); }} onDragLeave={() => setDragging(false)}
-            onDrop={(event) => { event.preventDefault(); setDragging(false); chooseFile(event.dataTransfer.files[0]); }}>
-            <div className="upload-description">{pendingFile || selectedMedia ? <><h3 title={pendingFile?.name || selectedMedia?.filename}>{pendingFile?.name || selectedMedia?.filename}</h3>
-              <p>{pendingFile ? `${formatSize(pendingFile.size)} · Ready to import` : `${formatTime(selectedMedia!.duration)} · ${selectedMedia!.width}×${selectedMedia!.height} · ${formatSize(selectedMedia!.size_bytes)}`}</p></>
-              : <h3>Drop an MP4 or MKV here</h3>}</div>
-            <button type="button" className="choose-button" disabled={busy} onClick={() => fileInput.current?.click()}>{pendingFile || selectedMedia ? "Choose another file" : "Choose recording"}</button>
+      <section className="monitor-panel" aria-labelledby="monitor-heading">
+        <div className="panel-heading">
+          <h2 id="monitor-heading">Monitor</h2>
+          <div className="filter-tabs" aria-label="Monitor view">
+            <button type="button" aria-pressed={!selectedClip || showSource} onClick={() => setShowSource(true)}>Source</button>
+            <button type="button" aria-pressed={Boolean(selectedClip && !showSource)} disabled={!selectedClip} onClick={() => setShowSource(false)}>Output</button>
           </div>
-          <form className="settings-form" onSubmit={generate}>
-            <button className="generate-button" type="submit" disabled={busy || !selectedAssetsAvailable || (!pendingFile && !selectedMedia) || connection.state !== "online"}>
-              {busy ? (uploading ? "Importing…" : "Creating job…") : manual ? "Render selected interval" : "Generate candidates"}</button>
-            {uploading && <div className="upload-progress" role="status"><div><span>{uploadPercent === 100 ? "Validating recording…" : "Importing recording…"}</span><span>{uploadPercent}%</span></div><progress value={uploadPercent} max={100} aria-label="Upload progress" />
-              <button type="button" className="text-button" onClick={() => operation.current?.abort()}>Cancel upload</button></div>}
-            <section className="settings-section" aria-labelledby="basic-settings-heading">
-            <h3 className="settings-heading" id="basic-settings-heading">Basic Settings</h3>
-            <ExportControls settings={exportSettings} onChange={setExportSettings} media={pendingFile ? undefined : selectedMedia} disabled={busy} />
+          {recordingName && <button type="button" className="secondary-button" disabled={busy} onClick={() => fileInput.current?.click()}>Choose another file</button>}
+        </div>
+        <input ref={fileInput} type="file" accept=".mp4,.mkv,video/mp4,video/x-matroska" className="file-input" aria-label="Choose recording file" disabled={busy}
+          onChange={(event) => { chooseFile(event.target.files?.[0]); event.target.value = ""; }} />
+        <div className={`monitor-stage ${dragging ? "dragging" : ""}`}
+          onDragOver={(event) => { event.preventDefault(); if (!busy) setDragging(true); }}
+          onDragLeave={(event) => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setDragging(false); }}
+          onDrop={(event) => { event.preventDefault(); setDragging(false); chooseFile(event.dataTransfer.files[0]); }}>
+          {selectedClip && !showSource
+            ? <VideoMonitor key={selectedClip.id} src={apiPath(selectedClip.preview_url)} label={`${clipTitle} output preview`} ratio={savedSize.width / savedSize.height} />
+            : pendingFile ? <LocalRecordingMonitor file={pendingFile} />
+            : selectedMedia ? <SourceFrameMonitor key={selectedMedia.id} media={selectedMedia} available={selectedAssetsAvailable} />
+            : <div className="monitor-empty upload-zone">
+              <span className="monitor-glyph import-glyph" aria-hidden="true">↑</span>
+              <h3>Import a recording</h3><p>Drop an MP4 or MKV here.</p>
+              <button type="button" className="choose-button secondary-button" disabled={busy} onClick={() => fileInput.current?.click()}>Choose recording</button>
+            </div>}
+        </div>
+        {(recordingName || selectedClip) && <div className="monitor-footer">
+          <span className="monitor-identity" title={selectedClip && !showSource ? clipTitle : recordingName}>{selectedClip && !showSource ? clipTitle : recordingName}</span>
+          {selectedClip && !showSource ? <span>{formatTime(selectedClip.start)} – {formatTime(selectedClip.end)} · {savedSize.width} × {savedSize.height}</span>
+            : pendingFile ? <span>{formatSize(pendingFile.size)} · Ready to import</span>
+            : selectedMedia && <span>{formatTime(selectedMedia.duration)} · {selectedMedia.width} × {selectedMedia.height} · {formatSize(selectedMedia.size_bytes)}</span>}
+        </div>}
+      </section>
+
+      {uploading && <div className="upload-progress" role="status"><div><span>{uploadPercent === 100 ? "Validating recording…" : "Importing recording…"}</span><span>{uploadPercent}%</span></div>
+        <progress value={uploadPercent} max={100} aria-label="Upload progress" />
+        <button type="button" className="secondary-button" onClick={() => operation.current?.abort()}>Cancel upload</button></div>}
+
+      {selectedJob && <div className={`job-status ${selectedJob.state}`}>
+        <div className="job-status-top"><div><span className="job-kind">{selectedJob.source_candidate_id ? "Timestamp revision" : "Candidate run"}</span><h3 aria-live="polite">{phaseLabels[selectedJob.phase] || selectedJob.phase}</h3></div><StateBadge job={selectedJob} /></div>
+        {isActive(selectedJob) && <><progress value={selectedJob.progress_pct} max={100} aria-label="Processing progress" /><div className="job-progress-footer"><span>{selectedJob.progress_pct}% · Stage progress</span>
+          <button type="button" className="secondary-button" disabled={selectedJob.cancel_requested} onClick={() => cancelJob(selectedJob)}>{selectedJob.cancel_requested ? "Cancelling…" : "Cancel job"}</button></div></>}
+        {selectedJob.error_message && <p role="alert" className="job-error">{processorErrorMessage(selectedJob.error_message)}</p>}
+        {selectedJob.state === "completed" && <p className="job-complete-detail">{selectedJob.elapsed_seconds !== null ? `Processing time ${selectedJob.elapsed_seconds.toFixed(1)}s` : "Processing finished"}
+          {selectedJob.caption_status === "no_speech" ? " · No speech detected" : selectedJob.language ? ` · ${selectedJob.language.toUpperCase()} speech` : ""}</p>}
+      </div>}
+
+      <section className="results-panel" aria-labelledby="candidates-heading">
+        <div className="panel-heading"><h2 id="candidates-heading">Highlight Bin <span className="panel-count">{candidates.length}</span></h2>
+          <div className="filter-tabs" aria-label="Filter candidates"><button type="button" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>All</button>
+            <button type="button" aria-pressed={filter === "approved"} onClick={() => setFilter("approved")}>Approved {candidates.filter((candidate) => candidate.review_state === "approved").length}</button></div></div>
+        {candidatesLoading ? <div className="empty-state" role="status"><h3>Loading clips…</h3></div>
+          : shownCandidates.length > 0 ? <div className="candidate-grid">{shownCandidates.map((candidate) => {
+            const title = `Clip ${String(candidates.indexOf(candidate) + 1).padStart(2, "0")}`;
+            const current = candidate.id === selectedClip?.id;
+            return <article key={candidate.id} className={`candidate-card ${current ? "selected" : ""}`}>
+              <button type="button" className="clip-select" aria-pressed={current} aria-label={`Preview ${title}`} onClick={() => selectClip(candidate)}>
+                <span className="clip-glyph" aria-hidden="true">▶</span>
+                <span><strong>{title}</strong><small>{formatTime(candidate.start)} – {formatTime(candidate.end)} · {(candidate.end - candidate.start).toFixed(1)}s</small></span>
+              </button>
+              <div className="clip-tile-meta"><span className={`review-label ${candidate.review_state}`}>{candidate.review_state}</span><span>Score {candidate.score.toFixed(2)}</span></div>
+              <div className="clip-tile-actions">
+                <button className="secondary-button" type="button" disabled={busy} onClick={() => selectClip(candidate, true)} aria-label={`Adjust ${title}`}>Adjust</button>
+                <a className="secondary-button" href={apiPath(candidate.download_url)} aria-label={`Download ${title}`}>Download</a>
+              </div>
+            </article>;
+          })}</div>
+          : <div className="empty-state">
+            <h3>{filter === "approved" && candidates.length ? "No approved clips yet" : selectedJob && isActive(selectedJob) ? "Clips are pending" : selectedJob?.state === "completed" ? "No candidates found" : selectedJob?.state === "failed" || selectedJob?.state === "cancelled" ? "No clips available for this job" : "No clips yet"}</h3>
+            {filter === "approved" && candidates.length ? <p>Approve a candidate to find it here.</p>
+              : selectedJob?.state === "completed" ? <p>Try a manual interval or another recording.</p>
+              : !selectedJob && <p>Import a recording and generate highlights.</p>}
+          </div>}
+      </section>
+
+      <details className="history-panel">
+        <summary><span>Job history <span className="panel-count">{recentJobs.length}</span></span>
+          <span className="history-summary">{activeJobs > 0 ? `${activeJobs} active` : recentJobs.length === 0 ? "No processing jobs" : "Past runs"}</span>
+        </summary>
+        {recentJobs.length === 0 ? <p className="history-empty">No processing jobs</p>
+          : <div className="job-list">{recentJobs.map((job) => {
+            const filename = media.find((record) => record.id === job.media_id)?.filename || "Imported recording";
+            return <button key={job.id} type="button" disabled={busy} className={`job-row ${job.id === selectedJobId ? "selected" : ""}`} aria-pressed={job.id === selectedJobId} onClick={() => selectJob(job)}>
+              <span className="job-row-name"><strong title={filename}>{filename}</strong><small>{job.source_candidate_id ? "Timestamp revision" : "Candidate run"} · {new Date(job.created_at).toLocaleString()}
+                {isActive(job) && ` · ${job.progress_pct}%`}</small></span><StateBadge job={job} /></button>;
+          })}</div>}
+      </details>
+    </main>
+
+    <aside className="studio-inspector" id="studio-inspector" data-open={inspectorOpen} aria-labelledby="inspector-heading">
+      <div className="panel-heading"><h2 ref={inspectorHeading} id="inspector-heading" tabIndex={-1}>Inspector</h2>
+        <div className="filter-tabs" aria-label="Inspector settings">
+          <button type="button" aria-pressed={!clipInspector} onClick={() => setInspectorMode("recording")}>Recording</button>
+          <button type="button" aria-pressed={clipInspector} disabled={!selectedClip} onClick={() => setInspectorMode("clip")}>Clip</button>
+        </div>
+      </div>
+      {candidates.map((candidate, index) => <ClipInspector key={candidate.id} candidate={candidate} index={index + 1}
+        hidden={!clipInspector || candidate.id !== selectedClip?.id} duration={selectedMedia?.duration ?? candidate.end}
+        media={selectedMedia} initialFraming={selectedJob?.options.framing ?? null}
+        initialLayout={selectedJob?.options.layout ?? "pad"} initialExportSettings={savedSettings} onReview={reviewCandidate} onRender={renderCandidate} onInvalid={revealInvalidField} />)}
+      <form id="generation-settings" className="settings-form" onSubmit={generate} onInvalidCapture={revealInvalidField} hidden={clipInspector}>
+        {!recordingName && <div className="inspector-info"><h3>Recording</h3><p>MP4 or MKV · Up to 100 GB</p></div>}
+        {!selectedAssetsAvailable && <p role="status" className="inline-error">{assetStatusLabels[selectedAssetStatus] || "Deleting files…"}</p>}
+        <details className="inspector-section" open><summary>Output</summary><div className="inspector-fields">
+          <ExportControls settings={exportSettings} onChange={setExportSettings} media={pendingFile ? undefined : selectedMedia} disabled={busy} />
+        </div></details>
+        <details className="inspector-section" open><summary>Processing</summary><div className="inspector-fields">
             <div className="form-grid two">
               <label>Clip count<select value={count} onChange={(event) => setCount(event.target.value)} disabled={busy || manual}>
                 <option value="1">Up to 1 clip</option>
@@ -701,49 +865,13 @@ export default function Workspace() {
             <label className="checkbox-label"><input type="checkbox" checked={manual} onChange={(event) => setManual(event.target.checked)} disabled={busy} />Choose timestamps manually</label>
             {manual && <div className="form-grid two"><label>Start (seconds)<input type="number" step="any" min="0" value={manualStart} onChange={(event) => setManualStart(event.target.value)} required disabled={busy} /></label>
               <label>End (seconds)<input type="number" step="any" min="0" value={manualEnd} onChange={(event) => setManualEnd(event.target.value)} required disabled={busy} /></label></div>}
-            </section>
-            <FramingEditor key={workspaceKey} value={framing} onChange={setFraming} mediaId={selectedAssetsAvailable ? selectedMedia?.id : undefined} width={selectedMedia?.width} height={selectedMedia?.height}
-              duration={selectedMedia?.duration} ratio={aspectRatio} resolution={resolution} disabled={busy}
-              interval={manual?{start:Number(manualStart),end:Number(manualEnd)}:undefined}/>
-          </form>
-        </section>
-
-        <div className="review-workspace">
-        <section className="results-panel" aria-labelledby="candidates-heading">
-          <div className="results-heading"><h2 id="candidates-heading">Candidate clips <span>{candidates.length}</span></h2>
-            <div className="filter-tabs" aria-label="Filter candidates"><button type="button" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>All</button>
-              <button type="button" aria-pressed={filter === "approved"} onClick={() => setFilter("approved")}>Approved {candidates.filter((candidate) => candidate.review_state === "approved").length}</button></div></div>
-          {selectedJob && <div className={`job-status ${selectedJob.state}`}>
-            <div className="job-status-top"><div><span className="job-kind">{selectedJob.source_candidate_id ? "Timestamp revision" : "Candidate run"}</span><h3>{phaseLabels[selectedJob.phase] || selectedJob.phase}</h3></div><StateBadge job={selectedJob} /></div>
-            {isActive(selectedJob) && <><progress value={selectedJob.progress_pct} max={100} aria-label="Processing progress" /><div className="job-progress-footer"><span>{selectedJob.progress_pct}% · Stage progress</span>
-              <button type="button" disabled={selectedJob.cancel_requested} onClick={() => cancelJob(selectedJob)}>{selectedJob.cancel_requested ? "Cancelling…" : "Cancel job"}</button></div></>}
-            {selectedJob.error_message && <p role="alert" className="job-error">{processorErrorMessage(selectedJob.error_message)}</p>}
-            {selectedJob.state === "completed" && <p className="job-complete-detail">{selectedJob.elapsed_seconds !== null ? `Processing time ${selectedJob.elapsed_seconds.toFixed(1)}s` : "Processing finished"}
-              {selectedJob.caption_status === "no_speech" ? " · No speech detected" : selectedJob.language ? ` · ${selectedJob.language.toUpperCase()} speech` : ""}</p>}
-          </div>}
-
-          {candidatesLoading ? <div className="empty-state" role="status"><h3>Loading clips…</h3></div>
-            : shownCandidates.length > 0 ? <div className="candidate-grid">{shownCandidates.map((candidate) => <CandidateCard key={candidate.id} candidate={candidate} duration={selectedMedia?.duration ?? candidate.end}
-              media={selectedMedia} initialFraming={selectedJob?.options.framing||null}
-              initialLayout={selectedJob?.options.layout || "pad"} initialExportSettings={exportSettingsFromJob(selectedJob)} onReview={reviewCandidate} onRender={renderCandidate} />)}</div>
-            : <div className="empty-state">
-              <h3>{filter === "approved" && candidates.length ? "No approved clips yet" : selectedJob && isActive(selectedJob) ? "Clips are pending" : selectedJob?.state === "completed" ? "No candidates found" : selectedJob?.state === "failed" || selectedJob?.state === "cancelled" ? "No clips available for this job" : "No clips yet"}</h3>
-              {filter === "approved" && candidates.length ? <p>Approve a candidate to find it here.</p>
-                : selectedJob?.state === "completed" ? <p>Try a manual interval or another recording.</p>
-                : !selectedJob && <p>Import a recording and generate highlights to get started.</p>}</div>}
-        </section>
-
-      <section className="history-panel" aria-labelledby="history-heading"><div className="panel-heading"><h2 id="history-heading">Job history</h2>{selectedMedia && <span title={selectedMedia.filename}>{selectedMedia.filename}</span>}</div>
-        {recentJobs.length === 0 ? <div className="history-empty"><h3>No processing jobs</h3><p>Your processing history will appear here.</p></div>
-          : <div className="job-list">{recentJobs.map((job) => {
-            const filename = media.find((record) => record.id === job.media_id)?.filename || "Imported recording";
-            return <button key={job.id} type="button" disabled={busy} className={`job-row ${job.id === selectedJobId ? "selected" : ""}`} aria-pressed={job.id === selectedJobId} onClick={() => selectJob(job)}>
-              <span className="job-row-name"><strong title={filename}>{filename}</strong><small>{job.source_candidate_id ? "Timestamp revision" : "Candidate run"} · {new Date(job.created_at).toLocaleString()}</small></span>
-              <StateBadge job={job} /></button>;
-          })}</div>}
-      </section>
-        </div>
-      </div>
-    </main>
+        </div></details>
+        <details className="inspector-section" open><summary>Framing</summary><div className="inspector-fields">
+          <FramingEditor key={workspaceKey} value={framing} onChange={setFraming} mediaId={selectedAssetsAvailable ? selectedMedia?.id : undefined} width={selectedMedia?.width} height={selectedMedia?.height}
+            duration={selectedMedia?.duration} ratio={aspectRatio} resolution={resolution} disabled={busy} showHeading={false}
+            interval={manual ? { start: Number(manualStart), end: Number(manualEnd) } : undefined} />
+        </div></details>
+      </form>
+    </aside>
   </div>;
 }

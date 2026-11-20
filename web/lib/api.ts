@@ -194,6 +194,23 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   return payload as T;
 }
 
+export async function requestPreviewFrame(mediaId: string, body: object, signal: AbortSignal): Promise<Job & { frame_url: string }> {
+  let job = await apiRequest<Job>(`/media/${mediaId}/frames`, { method: "POST", body: JSON.stringify(body), signal });
+  for (let attempt = 0; attempt < 600 && job.state !== "completed"; attempt++) {
+    if (job.state === "failed") throw new Error(job.error_message ? processorErrorMessage(job.error_message) : "Frame preview failed. Try again.");
+    if (job.state === "cancelled") throw new Error("Frame preview cancelled.");
+    await new Promise<void>((resolve, reject) => {
+      const abort = () => { clearTimeout(timer); reject(new DOMException("Cancelled", "AbortError")); };
+      const timer = setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, 500);
+      if (signal.aborted) abort();
+      else signal.addEventListener("abort", abort, { once: true });
+    });
+    job = await apiRequest<Job>(`/jobs/${job.id}`, { signal });
+  }
+  if (!job.frame_url) throw new Error("Preview is still queued. Retry after current processing finishes.");
+  return { ...job, frame_url: job.frame_url };
+}
+
 export function uploadFile(file: File, progress: (value: number) => void, signal: AbortSignal): Promise<Media> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();

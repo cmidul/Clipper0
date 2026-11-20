@@ -1,14 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent } from "react";
-import { apiPath, apiRequest, DEFAULT_FRAMING, FRAMING_LABELS, intervalError, outputDimensions, processorErrorMessage, type AspectRatio, type FocusPoint, type FocusRegion, type FramingMode, type FramingOptions, type FramingPlan, type Job, type Resolution } from "../lib/api";
+import { apiPath, DEFAULT_FRAMING, FRAMING_LABELS, intervalError, outputDimensions, requestPreviewFrame, type AspectRatio, type FocusPoint, type FocusRegion, type FramingMode, type FramingOptions, type FramingPlan, type Resolution } from "../lib/api";
 import { coversRegion, cropPreview, displayedFramingMode, framingError, normalizedPoint, plannedCrop, regionBetween, selectFramingMode, VISIBLE_FRAMING_MODES } from "../lib/framing";
 
-export default function FramingEditor({value,onChange,mediaId,width=1920,height=1080,duration=0,initialTime=0,ratio,resolution=720,disabled=false,plan,original,interval}: {
+export default function FramingEditor({value,onChange,mediaId,width=1920,height=1080,duration=0,initialTime=0,ratio,resolution=720,disabled=false,plan,original,interval,showHeading=true}: {
   value: FramingOptions|null; onChange:(value:FramingOptions|null)=>void; mediaId?:string;
   width?:number; height?:number; duration?:number; initialTime?:number; ratio:AspectRatio; resolution?:Resolution; disabled?:boolean; plan?:FramingPlan|null;
   original?: { settings: FramingOptions | null; ratio: AspectRatio };
   interval?: { start: number; end: number };
+  showHeading?: boolean;
 }) {
   const [time,setTime]=useState(String(initialTime));
   const [frame,setFrame]=useState<string|null>(null);
@@ -49,16 +50,8 @@ export default function FramingEditor({value,onChange,mediaId,width=1920,height=
     setBusy(true);setError(null);request.current?.abort();
     const controller=new AbortController();request.current=controller;
     try {
-      let job=await apiRequest<Job>(`/media/${mediaId}/frames`,{method:"POST",
-        body:JSON.stringify({time:seconds, ...(kind === "composition" ? {composition} : {})}),signal:controller.signal});
-      for(let i=0;i<600 && job.state!=="completed";i++) {
-        if (job.state === "failed") throw new Error(job.error_message ? processorErrorMessage(job.error_message) : "Frame preview failed. Try again.");
-        if (job.state === "cancelled") throw new Error("Frame preview cancelled.");
-        await new Promise<void>((resolve,reject)=>{const abort=()=>{clearTimeout(timer);reject(new DOMException("Cancelled","AbortError"));};const timer=setTimeout(()=>{controller.signal.removeEventListener("abort",abort);resolve();},500);if(controller.signal.aborted)abort();else controller.signal.addEventListener("abort",abort,{once:true});});
-        job=await apiRequest<Job>(`/jobs/${job.id}`,{signal:controller.signal});
-      }
+      const job=await requestPreviewFrame(mediaId,{time:seconds, ...(kind === "composition" ? {composition} : {})},controller.signal);
       if (request.current !== controller || controller.signal.aborted) return;
-      if(!job.frame_url) throw new Error("Preview is still queued. Retry after current processing finishes.");
       if (kind === "composition") {
         setRendered({url:apiPath(job.frame_url), key:compositionKey, mode:job.frame_framing_mode});
       } else {
@@ -140,7 +133,7 @@ export default function FramingEditor({value,onChange,mediaId,width=1920,height=
       {selected&&<div className="region-grid">{(["x","y","width","height"] as const).map(field=><label key={field}>{field}<input aria-label={`${title} ${field}`} type="number" min="0" max="1" step="0.01" value={selected[field]} disabled={locked} onChange={event=>update({[key]:{...selected,[field]:Number(event.target.value)}})}/></label>)}</div>}</div>;
   }
   return <section className="framing-editor" aria-label="Framing">
-    <h3 className="settings-heading">Framing</h3>
+    {showHeading && <h3 className="settings-heading">Framing</h3>}
     <label>Framing mode<select value={selectedMode} disabled={disabled} onChange={event=>changeMode(event.target.value)}>
       {VISIBLE_FRAMING_MODES.map(mode=><option key={mode} value={mode}>{FRAMING_LABELS[mode]}</option>)}
     </select></label>

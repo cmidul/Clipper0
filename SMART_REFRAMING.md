@@ -52,7 +52,7 @@ layout-aware placement, not pixel-level text/HUD collision detection. Fonts must
 installed locally for the spoken/written language; transcription quality varies.
 Long caption text is divided into at most two visible lines per timed ASS event.
 
-Open **Adjust clip** to change framing and render a revision. The original remains.
+Choose **Adjust** on a clip in the Highlight Bin to open its Inspector. Change the framing there, then choose **Render revision** in the toolbar. The original remains.
 Framing revisions of speech-enabled jobs reuse the validated parent transcript and
 explicit interval; inference and highlight selection do not run again. Missing or
 invalid parent transcripts produce an actionable failure instead of silent inference.

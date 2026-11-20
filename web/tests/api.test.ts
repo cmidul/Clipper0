@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { apiPath, apiRequest, ASPECT_RATIO_OPTIONS, COMPRESSION_OPTIONS, errorDetail, formatTime,
-  intervalError, localApiBase, outputSizeLabel, processorErrorMessage, VIDEO_QUALITY_OPTIONS } from "../lib/api.ts";
+  intervalError, localApiBase, outputSizeLabel, processorErrorMessage, requestPreviewFrame, VIDEO_QUALITY_OPTIONS } from "../lib/api.ts";
 
 test("shape, resolution, and compression have separate selector choices", () => {
   assert.deepEqual(ASPECT_RATIO_OPTIONS, [
@@ -72,6 +72,29 @@ test("API client surfaces failures and preserves abort cancellation", async () =
     await assert.rejects(apiRequest("/jobs"), /Cannot reach the local processor/);
     globalThis.fetch = async () => { throw new DOMException("Cancelled", "AbortError"); };
     await assert.rejects(apiRequest("/jobs"), { name: "AbortError" });
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("frame previews submit the requested parameters and poll the existing job route", async () => {
+  const original = globalThis.fetch;
+  const calls: { path: string; method?: string; body?: BodyInit | null }[] = [];
+  const controller = new AbortController();
+  try {
+    globalThis.fetch = async (url, options) => {
+      const path = new URL(String(url)).pathname;
+      calls.push({ path, method: options?.method, body: options?.body });
+      assert.equal(options?.signal, controller.signal);
+      return Response.json(path === "/media/recording/frames"
+        ? { id: "preview", state: "queued" }
+        : { id: "preview", state: "completed", frame_url: "/frames/preview" });
+    };
+    assert.equal((await requestPreviewFrame("recording", { time: 5 }, controller.signal)).frame_url, "/frames/preview");
+    assert.deepEqual(calls, [
+      { path: "/media/recording/frames", method: "POST", body: '{"time":5}' },
+      { path: "/jobs/preview", method: undefined, body: undefined },
+    ]);
   } finally {
     globalThis.fetch = original;
   }

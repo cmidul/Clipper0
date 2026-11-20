@@ -2,6 +2,8 @@
 
 ## Unreleased — 2026-11-20
 
+- Rebuilt the dashboard as a dark editing workspace with a Media Library, central Source and Output Monitor, Highlight Bin, compact job drawer, and contextual Inspector. Older projects and exports continue to use the existing routes and settings.
+
 - Compacted the workspace, recording import, and empty states. Grouped clipping settings and moved advanced framing into a collapsible section.
 
 - Simplified the framing dropdown to Focus Crop, Hybrid Focus, Full Frame, and Auto. Existing clips and saved legacy framing settings remain available.

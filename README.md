@@ -6,7 +6,7 @@ Clipper0 turns owned or authorized MP4 and MKV recordings into short highlight c
 
 - Rank up to 10 candidate clips of 15–60 seconds, or specify a manual interval. Ranking uses audio peaks, optional speech cues, and temporal coverage on long recordings. Review the suggested moments yourself.
 - Export H.264 MP4s in 9:16, 16:9, 1:1, or 4:5 at 480p, 720p, or 1080p. Aspect ratio, resolution, and compression are separate controls. A larger export can upscale the source and preserves only the detail already present.
-- Reframe with **Focus Crop**, **Hybrid Focus**, **Full Frame**, **Auto**, or streamer/gameplay split. Set a manual focus point, select a region, adjust zoom, and render a new revision from **Adjust clip**. Read the [framing guide](SMART_REFRAMING.md).
+- Reframe with **Focus Crop**, **Hybrid Focus**, **Full Frame**, or **Auto**. Use **Adjust** in the Highlight Bin to open the clip Inspector. Set a focus point or region, adjust zoom, then choose **Render revision** in the toolbar. Read the [framing guide](SMART_REFRAMING.md).
 - Generate multilingual captions with an optional local Faster-Whisper model. Download the video and SRT when available.
 - Reopen a project, review candidates, and download previous versions. Archiving keeps managed files. **Delete Project Files** removes recognized managed copies and exports while preserving the original source recording.
 
@@ -63,7 +63,7 @@ npm.cmd run start
 
 1. Open `http://127.0.0.1:3000` and choose a 20–60-second recording with a clear audio event.
 2. Choose a shape, resolution, and framing mode. Select **Generate candidates**. If nothing ranks, choose a manual 15–60-second interval.
-3. Play a result. In **Adjust clip**, choose **Focus Crop**, set a focus point and zoom, and request a composition preview. The preview shows framing and caption guides. The final MP4 includes burned-in captions when speech is available.
+3. Select a result in the **Highlight Bin** and play it in the **Monitor**. Choose **Adjust**, select **Focus Crop**, then set a focus point and zoom and request a composition preview. The preview shows framing and caption guides. The final MP4 includes burned-in captions when speech is available.
 4. Render the revision and compare it with the original. Download the MP4, reload the dashboard, and check the saved project and revision.
 5. Stop both terminals with Ctrl+C when finished. Let the worker finish handling cancellation before closing its terminal.
 

@@ -45,7 +45,7 @@ function installProjectFixture() {
   const job = {
     id: "b".repeat(32), media_id: media.id, state: "completed", phase: "done", kind: "render",
     created_at: "2026-01-01T00:00:00Z", elapsed_seconds: 1,
-    options: { layout: "pad", aspect_ratio: "4:5", resolution: 480, compression: "smaller_file" },
+    options: { layout: "pad", aspect_ratio: "4:5", resolution: 480, compression: "smaller_file", framing: { mode: "full_gameplay" } },
   };
   const fetchOriginal = window.fetch.bind(window);
   window.exportSettingsTestRequestCount = 0;
@@ -162,11 +162,12 @@ try {
   assert.ok(await evaluate(() => document.querySelector(".settings-form").textContent.includes("A larger export cannot recover source detail.")));
 
   await evaluate(() => {
-    const details = [...document.querySelectorAll(".framing-editor details")].find(
+    const details = [...document.querySelectorAll(".settings-form .framing-editor details")].find(
       (element) => element.querySelector("summary").textContent === "Source preview and manual focus",
     );
+    details.parentElement.closest("details").open = true;
     details.querySelector("summary").click();
-    [...details.querySelectorAll("button")].find((button) => button.textContent === "Load frame").click();
+    [...details.querySelectorAll("button")].find((button) => button.textContent === "Load source frame").click();
   });
   await waitFor(() => {
     if (frameError) throw frameError;
@@ -203,7 +204,10 @@ try {
     compression.value = "higher_quality";
     compression.dispatchEvent(new Event("change", { bubbles: true }));
   });
-  await evaluate(() => document.querySelector(".job-row").click());
+  await evaluate(() => {
+    document.querySelector(".history-panel > summary").click();
+    document.querySelector(".job-row").click();
+  });
   await waitFor(() => evaluate(() => {
     const fields = [...document.querySelectorAll(".settings-form select")].slice(0, 3);
     return fields.map((field) => field.value).join(" ") === "4:5 480 smaller_file";

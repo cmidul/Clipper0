@@ -20,6 +20,16 @@
 
 ## Current handoff
 
+### Creator Studio Dark redesign — 2026-11-20
+
+- Live rollout completed at `http://127.0.0.1:3000`. Built the production frontend from `web/`, restarted the frontend, and verified the updated dashboard and all seven referenced assets returned HTTP 200. The processor stayed on the same process and its health endpoint returned HTTP 200.
+
+- Replaced the old dashboard grid with a toolbar, Media Library, central Source and Output Monitor, Highlight Bin, compact job drawer, and contextual Recording and Clip Inspector. The studio palette uses charcoal surfaces, an indigo accent, the bundled Inter font, and consistent controls. At laptop size the side panels narrow. At 1024px the toggles dock one panel without covering the player, and at mobile width they open drawers.
+- Changed `web/app/page.tsx`, `web/app/globals.css`, `web/components/MediaMonitor.tsx`, `web/components/FramingEditor.tsx`, and `web/lib/api.ts`. The monitor plays compatible chosen recordings locally, loads frames for imported recordings, and plays rendered outputs using the existing media route. The shared frame request retains the preview-job workflow. Selecting clips or changing Inspector views keeps revision drafts. Updated `web/tests/api.test.ts`, `web/tests/export-settings.browser.mjs`, README, SMART_REFRAMING, and CHANGELOG.
+- Passed TypeScript, the production build, 16 frontend unit tests, and seven targeted backend framing, preview, review, download, and revision tests. The export-settings browser check passed for all 12 dimensions, preview canvases, and saved settings restoration.
+- Approved isolated Edge fixture checks passed at 1920×1080, 1366×768, 1024×768, and 390×844. Verified empty and selected recording states, upload and generation requests, job progress, completed clips, playback and scrubbing, clip selection, draft zoom persistence, framing stills, revision request, byte-identical fixture MP4 download, job history, archive and delete dialogs with safe initial focus, and actionable errors. Before/after screenshots are in `local-data/test-runs/creator-studio/evidence-1795185146604/`.
+- Initial Edge startup needed Windows sandbox escalation. The fixture harness was then corrected to return primitive values and use browser playback activation. The visual pass prompted more accessible player controls and a fix for an archived filename clipping Restore. The final rerun passed. API mutations in the browser run used fixtures. No new render or real project mutation ran.
+
 ### Public beta dashboard polish — 2026-11-20
 
 - Implemented the compact Workspace header, recording drop zone, clip and job empty states, sidebar filename truncation and tooltips, and responsive review and history panels. Grouped controls into Basic Settings, Framing, and a collapsible Advanced Framing section. Kept the four public framing choices and the existing form state and submission handlers.
@@ -399,6 +409,18 @@ Start a new dashboard chunk in this report before implementation. The backend/qu
 - Verify the older migration dependency targets on the desktop before installing. Laptop-installed wheels do not establish desktop compatibility.
 
 ## Work log
+
+- 2026-11-20 — Finished GitHub update preflight for Creator Studio Dark. TypeScript, 16 frontend tests, and the diff whitespace check passed. Verified the update contains source, tests, and documentation. Local media, screenshots, dependencies, and build output remain ignored.
+
+- 2026-11-20 — Started the requested GitHub update for Creator Studio Dark. Review the redesign, tests, and localhost rollout notes before committing to `main`.
+
+- 2026-11-20 — Finished the requested Creator Studio rollout. The dashboard and seven assets passed live HTTP checks on port 3000. The processor health check passed on port 8000.
+
+- 2026-11-20 — Started the requested Creator Studio rollout to localhost port 3000.
+
+- 2026-11-20 — Finished Creator Studio Dark redesign and isolated browser acceptance. Verified the final production build across four viewport sizes and kept the active localhost services on their existing versions.
+
+- 2026-11-20 — Started Creator Studio Dark redesign. Inspected the client dashboard, global stylesheet, framing editor, source frame endpoint, and export playback routes before restructuring.
 
 - 2026-11-20 — Finished GitHub update preflight. All 34 pending project files passed the private path check, added content passed the credential signature check, and the working-tree diff passed the whitespace check. The authorized update includes source, tests, and release preparation documentation.
 
